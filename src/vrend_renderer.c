@@ -622,6 +622,7 @@ static void vrend_destroy_shader_selector(struct vrend_shader_selector *sel)
    free(sel->tmp_buf);
    free(sel->sinfo.so_names);
    free(sel->sinfo.interpinfo);
+   free(sel->sinfo.sampler_arrays);
    free(sel->tokens);
    free(sel);
 }
@@ -760,13 +761,14 @@ static void dump_stream_out(struct pipe_stream_output_info *so)
    printf("\n");
    printf("outputs:\n");
    for (i = 0; i < so->num_outputs; i++) {
-      printf("\t%d: reg: %d sc: %d, nc: %d ob: %d do: %d\n",
+      printf("\t%d: reg: %d sc: %d, nc: %d ob: %d do: %d st: %d\n",
              i,
              so->output[i].register_index,
              so->output[i].start_component,
              so->output[i].num_components,
              so->output[i].output_buffer,
-             so->output[i].dst_offset);
+             so->output[i].dst_offset,
+             so->output[i].stream);
    }
 }
 
@@ -859,7 +861,7 @@ static struct vrend_linked_shader_program *add_shader_program(struct vrend_conte
                                                               struct vrend_shader *gs)
 {
    struct vrend_linked_shader_program *sprog = CALLOC_STRUCT(vrend_linked_shader_program);
-   char name[32];
+   char name[64];
    int i;
    GLuint prog_id;
    GLint lret;
@@ -982,7 +984,11 @@ static struct vrend_linked_shader_program *add_shader_program(struct vrend_conte
             index = 0;
             while(mask) {
                i = u_bit_scan(&mask);
-               snprintf(name, 32, "%ssamp%d", prefix, i);
+               if (sprog->ss[id]->sel->sinfo.num_sampler_arrays) {
+                  int arr_idx = shader_lookup_sampler_array(&sprog->ss[id]->sel->sinfo, i);
+                  snprintf(name, 32, "%ssamp%d[%d]", prefix, arr_idx, i - sprog->ss[id]->sel->sinfo.sampler_arrays[arr_idx].first);
+               } else
+                  snprintf(name, 32, "%ssamp%d", prefix, i);
                sprog->samp_locs[id][index] = glGetUniformLocation(prog_id, name);
                if (sprog->ss[id]->sel->sinfo.shadow_samp_mask & (1 << i)) {
                   snprintf(name, 32, "%sshadmask%d", prefix, i);
@@ -1035,7 +1041,11 @@ static struct vrend_linked_shader_program *add_shader_program(struct vrend_conte
 
          sprog->ubo_locs[id] = calloc(sprog->ss[id]->sel->sinfo.num_ubos, sizeof(uint32_t));
          for (i = 0; i < sprog->ss[id]->sel->sinfo.num_ubos; i++) {
-            snprintf(name, 32, "%subo%d", prefix, i + 1);
+            if (sprog->ss[id]->sel->sinfo.ubo_indirect)
+               snprintf(name, 32, "%subo[%d]", prefix, i);
+            else
+               snprintf(name, 32, "%subo%d", prefix, i + 1);
+
             sprog->ubo_locs[id][i] = glGetUniformBlockIndex(prog_id, name);
          }
       } else
@@ -6248,7 +6258,6 @@ int vrend_create_query(struct vrend_context *ctx, uint32_t handle,
    q->type = query_type;
    q->index = query_index;
    q->ctx_id = ctx->ctx_id;
-
    vrend_resource_reference(&q->res, res);
 
    switch (q->type) {
@@ -6311,7 +6320,10 @@ void vrend_begin_query(struct vrend_context *ctx, uint32_t handle)
    if (q->gltype == GL_TIMESTAMP)
       return;
 
-   glBeginQuery(q->gltype, q->id);
+   if (q->index > 0)
+      glBeginQueryIndexed(q->gltype, q->index, q->id);
+   else
+      glBeginQuery(q->gltype, q->id);
 }
 
 void vrend_end_query(struct vrend_context *ctx, uint32_t handle)
@@ -6333,7 +6345,10 @@ void vrend_end_query(struct vrend_context *ctx, uint32_t handle)
       return;
    }
 
-   glEndQuery(q->gltype);
+   if (q->index > 0)
+      glEndQueryIndexed(q->gltype, q->index);
+   else
+      glEndQuery(q->gltype);
 }
 
 void vrend_get_query_result(struct vrend_context *ctx, uint32_t handle,
@@ -6508,8 +6523,10 @@ bool vrend_renderer_fill_caps_common(uint32_t set, uint32_t version,
          caps->v1.glsl_level = 140;
       else if (gl_ver == 32)
          caps->v1.glsl_level = 150;
-      else if (gl_ver >= 33)
+      else if (gl_ver == 33)
          caps->v1.glsl_level = 330;
+      else if (gl_ver >= 40)
+         caps->v1.glsl_level = 400;
    } else {
       caps->v1.glsl_level = 130;
    }

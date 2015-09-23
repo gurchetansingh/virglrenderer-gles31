@@ -32,6 +32,15 @@ struct vrend_interp_info {
    int semantic_name;
    int semantic_index;
    int interpolate;
+   bool centroid;
+};
+
+struct vrend_sampler_array {
+   int first;
+   int last;
+   int idx;
+   int sview_type;
+   int sview_rtype;
 };
 
 struct vrend_shader_info {
@@ -41,6 +50,7 @@ struct vrend_shader_info {
    int num_interps;
    int num_outputs;
    int num_ubos;
+   bool ubo_indirect;
    int num_ucp;
    int glsl_ver;
    bool has_pervertex_out;
@@ -49,6 +59,10 @@ struct vrend_shader_info {
    uint32_t shadow_samp_mask;
    int gs_out_prim;
    uint32_t attrib_input_mask;
+
+   struct vrend_sampler_array *sampler_arrays;
+   int num_sampler_arrays;
+
    struct pipe_stream_output_info so_info;
 
    struct vrend_interp_info *interpinfo;
@@ -90,4 +104,6 @@ char *vrend_convert_shader(struct vrend_shader_cfg *cfg,
                            struct vrend_shader_key *key,
                            struct vrend_shader_info *sinfo);
 const char *vrend_shader_samplertypeconv(int sampler_type, int *is_shad);
+
+int shader_lookup_sampler_array(struct vrend_shader_info *sinfo, int index);
 #endif
