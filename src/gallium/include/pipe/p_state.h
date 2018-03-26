@@ -61,7 +61,8 @@ extern "C" {
 #define PIPE_MAX_SHADER_INPUTS    32
 #define PIPE_MAX_SHADER_OUTPUTS   48 /* 32 GENERICs + POS, PSIZE, FOG, etc. */
 #define PIPE_MAX_SHADER_SAMPLER_VIEWS 32
-#define PIPE_MAX_SHADER_RESOURCES 32
+#define PIPE_MAX_SHADER_BUFFERS   32
+#define PIPE_MAX_SHADER_IMAGES    32
 #define PIPE_MAX_TEXTURE_LEVELS   16
 #define PIPE_MAX_SO_BUFFERS        4
 #define PIPE_MAX_SO_OUTPUTS       64
@@ -383,6 +384,29 @@ struct pipe_sampler_view
    unsigned swizzle_a:3;         /**< PIPE_SWIZZLE_x for alpha component */
 };
 
+
+/**
+ * A description of a buffer or texture image that can be bound to a shader
+ * stage.
+ */
+struct pipe_image_view
+{
+   struct pipe_resource *resource; /**< resource into which this is a view  */
+   enum pipe_format format;      /**< typed PIPE_FORMAT_x */
+   unsigned access;              /**< PIPE_IMAGE_ACCESS_x */
+
+   union {
+      struct {
+         unsigned first_layer:16;     /**< first layer to use for array textures */
+         unsigned last_layer:16;      /**< last layer to use for array textures */
+         unsigned level:8;            /**< mipmap level to use */
+      } tex;
+      struct {
+         unsigned offset;   /**< offset in bytes */
+         unsigned size;     /**< size of the accessible sub-range in bytes */
+      } buf;
+   } u;
+};
 
 /**
  * Subregion of 1D/2D/3D image resource.

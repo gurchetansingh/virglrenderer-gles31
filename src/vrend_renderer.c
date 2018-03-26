@@ -238,6 +238,13 @@ struct vrend_sampler_view {
    struct vrend_resource *texture;
 };
 
+struct vrend_image_view {
+   GLuint id;
+   GLenum access;
+   GLenum format;
+   struct vrend_resource *texture;
+};
+
 struct vrend_vertex_element {
    struct pipe_vertex_element base;
    GLenum type;
