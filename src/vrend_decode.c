@@ -1049,7 +1049,7 @@ static int vrend_decode_bind_shader(struct vrend_decode_ctx *ctx, int length)
 
 static int vrend_decode_set_shader_buffers(struct vrend_decode_ctx *ctx, uint16_t length)
 {
-
+   return 0;
 }
 
 static int vrend_decode_set_shader_images(struct vrend_decode_ctx *ctx, uint16_t length)
@@ -1065,13 +1065,35 @@ static int vrend_decode_set_shader_images(struct vrend_decode_ctx *ctx, uint16_t
    if (shader_type >= PIPE_SHADER_TYPES)
       return EINVAL;
 
-   if (num_images < 1)
-      return EINVAL;
+   if (num_images < 1) {
+      vrend_set_num_shader_images(ctx->grctx, shader_type, 0, 0);
+      return 0;
+   }
    if (start_slot + num_images > PIPE_MAX_SHADER_IMAGES)
       return EINVAL;
 
    for (int i = 0; i < num_images; i++) {
+      uint32_t format = get_buf_entry(ctx, i * VIRGL_SET_SHADER_IMAGE_ELEMENT_SIZE + 3);
+      uint32_t access = get_buf_entry(ctx, i * VIRGL_SET_SHADER_IMAGE_ELEMENT_SIZE + 4);
+      uint32_t layer_offset = get_buf_entry(ctx, i * VIRGL_SET_SHADER_IMAGE_ELEMENT_SIZE + 5);
+      uint32_t level_size = get_buf_entry(ctx, i * VIRGL_SET_SHADER_IMAGE_ELEMENT_SIZE + 6);
+      uint32_t handle = get_buf_entry(ctx, i * VIRGL_SET_SHADER_IMAGE_ELEMENT_SIZE + 7);
+      vrend_set_single_image_view(ctx->grctx, shader_type, start_slot + i, format, access,
+                                  layer_offset, level_size, handle);
    }
+   vrend_set_num_shader_images(ctx->grctx, shader_type, start_slot, num_images);
+   return 0;
+}
+
+static int vrend_decode_memory_barrier(struct vrend_decode_ctx *ctx, uint16_t length)
+{
+
+   if (length != 1)
+      return EINVAL;
+
+   unsigned flags = get_buf_entry(ctx, VIRGL_MEMORY_BARRIER_FLAGS);
+   vrend_memory_barrier(ctx->grctx, flags);
+   return 0;
 }
 
 static int vrend_decode_set_streamout_targets(struct vrend_decode_ctx *ctx,
@@ -1301,6 +1323,9 @@ int vrend_decode_block(uint32_t ctx_id, uint32_t *block, int ndw)
          break;
       case VIRGL_CCMD_SET_SHADER_BUFFERS:
          ret = vrend_decode_set_shader_buffers(gdctx, len);
+         break;
+      case VIRGL_CCMD_MEMORY_BARRIER:
+         ret = vrend_decode_memory_barrier(gdctx, len);
          break;
       default:
          ret = EINVAL;

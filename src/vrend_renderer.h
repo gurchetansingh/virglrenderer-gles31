@@ -237,7 +237,18 @@ void vrend_set_index_buffer(struct vrend_context *ctx,
                             uint32_t res_handle,
                             uint32_t index_size,
                             uint32_t offset);
-
+void vrend_set_single_image_view(struct vrend_context *ctx,
+				 uint32_t shader_type,
+				 int index,
+				 uint32_t format, uint32_t access,
+				 uint32_t layer_offset, uint32_t level_size,
+				 uint32_t handle);
+void vrend_set_num_shader_images(struct vrend_context *ctx,
+				 uint32_t shader_type,
+				 uint32_t start_slot,
+				 uint32_t count);
+void vrend_memory_barrier(struct vrend_context *ctx,
+			  unsigned flags);
 #define VREND_TRANSFER_WRITE 1
 #define VREND_TRANSFER_READ 2
 int vrend_renderer_transfer_iov(const struct vrend_transfer_info *info, int transfer_mode);
