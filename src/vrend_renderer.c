@@ -164,6 +164,9 @@ struct vrend_linked_shader_program {
    GLuint clip_locs[8];
    uint32_t images_used_mask[PIPE_SHADER_TYPES];
    GLuint *img_locs[PIPE_SHADER_TYPES];
+
+   uint32_t ssbo_used_mask[PIPE_SHADER_TYPES];
+   GLuint *ssbo_locs[PIPE_SHADER_TYPES];
 };
 
 struct vrend_shader {

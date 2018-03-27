@@ -112,6 +112,12 @@ struct dump_ctx {
    uint32_t images_used;
    bool iviews_used;
 
+   uint32_t ssbo_used;
+
+   struct vrend_image_array *image_arrays;
+   int num_image_arrays;
+   int last_image_array_idx;
+
    struct vrend_sampler_array *sampler_arrays;
    int num_sampler_arrays;
    int last_sampler_array_idx;
@@ -168,6 +174,7 @@ struct dump_ctx {
    bool write_mul_temp;
    bool write_interp_temp;
    bool early_depth_stencil;
+   bool ssbo;
 };
 
 const char *get_internalformat_string(int virgl_format, enum tgsi_return_type *stype);
@@ -757,6 +764,14 @@ iter_declaration(struct tgsi_iterate_context *iter,
          return FALSE;
       }
       add_images(ctx, decl->Range.First, decl->Range.Last, &decl->Image);
+      break;
+   case TGSI_FILE_BUFFER:
+      if (decl->Range.First >= 32) {
+         fprintf(stderr, "Buffer view exceeded, max is %lu\n", 32);
+         return FALSE;
+      }
+      ctx->ssbo_used |= (1 << decl->Range.First);
+      ctx->ssbo = true;
       break;
    case TGSI_FILE_CONSTANT:
       if (decl->Declaration.Dimension) {
@@ -1798,11 +1813,13 @@ static int
 translate_load(struct dump_ctx *ctx,
 	       struct tgsi_full_instruction *inst,
 	       int sreg_index,
+	       const char *dstconv,
 	       char srcs[4][255],
 	       char dsts[3][255])
 {
    char buf[512];
    bool is_ms = false;
+   const struct tgsi_full_src_register *src = &inst->Src[0];
    const char *coord_prefix = get_coord_prefix(ctx->images[sreg_index].decl.Resource, &is_ms);
    enum tgsi_return_type itype;
    const char *formatstr = get_internalformat_string(ctx->images[sreg_index].decl.Format, &itype);
@@ -1819,7 +1836,10 @@ translate_load(struct dump_ctx *ctx,
       dtypeprefix = "intBitsToFloat";
       break;
    }
-   snprintf(buf, 255, "%s = %s(imageLoad(%s, %s(floatBitsToInt(%s))%s));\n", dsts[0], dtypeprefix, srcs[0], coord_prefix, srcs[1], ms_str);
+   if (src->Register.File == TGSI_FILE_IMAGE)
+      snprintf(buf, 255, "%s = %s(imageLoad(%s, %s(floatBitsToInt(%s))%s));\n", dsts[0], dtypeprefix, srcs[0], coord_prefix, srcs[1], ms_str);
+   else if (src->Register.File == TGSI_FILE_BUFFER)
+      snprintf(buf, 255, "%s = %s(uintBitsToFloat(%s[int(%s)>>2]));\n", dsts[0], dstconv, srcs[0], srcs[1]);
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 
@@ -2004,7 +2024,7 @@ iter_instruction(struct tgsi_iterate_context *iter,
          }
       } else {
          snprintf(dstconv, 6, "vec4");
-         snprintf(udstconv, 6, "uvec4");
+          snprintf(udstconv, 6, "uvec4");
       }
       if (dst->Register.File == TGSI_FILE_OUTPUT) {
          for (j = 0; j < ctx->num_outputs; j++) {
@@ -2058,7 +2078,8 @@ iter_instruction(struct tgsi_iterate_context *iter,
       else if (dst->Register.File == TGSI_FILE_IMAGE) {
 	 const char *cname = tgsi_proc_to_prefix(ctx->prog_type);
 	 if (dst->Register.Indirect) {
-	    fprintf(stderr, "TODO\n");
+            assert(dst->Indirect.File == TGSI_FILE_ADDRESS);
+            snprintf(dsts[i], 255, "%simg[%d]", cname, dst->Register.Index);
 	 } else
 	    snprintf(dsts[i], 255, "%simg%d", cname, dst->Register.Index);
 	 sreg_index = dst->Register.Index;
@@ -2223,6 +2244,14 @@ iter_instruction(struct tgsi_iterate_context *iter,
 	    snprintf(srcs[i], 255, "%simg%d%s", cname, src->Register.Index, swizzle);
 	 }
 	 sreg_index = src->Register.Index;
+      } else if (src->Register.File == TGSI_FILE_BUFFER) {
+	 const char *cname = tgsi_proc_to_prefix(ctx->prog_type);
+	 if (ctx->info.indirect_files & (1 << TGSI_FILE_BUFFER)) {
+	    fprintf(stderr, "TODO\n");
+	 } else {
+	    snprintf(srcs[i], 255, "ssbocontents%d%s", src->Register.Index, swizzle);
+	 }
+	 sreg_index = src->Register.Index;
       } else if (src->Register.File == TGSI_FILE_IMMEDIATE) {
          if (src->Register.Index >= ARRAY_SIZE(ctx->imm)) {
             fprintf(stderr, "Immediate exceeded, max is %lu\n", ARRAY_SIZE(ctx->imm));
@@ -2235,7 +2264,8 @@ iter_instruction(struct tgsi_iterate_context *iter,
          const char *imm_stypeprefix = stypeprefix;
 
          if ((inst->Instruction.Opcode == TGSI_OPCODE_TG4 && i == 1) ||
-             (inst->Instruction.Opcode == TGSI_OPCODE_INTERP_SAMPLE && i == 1))
+             (inst->Instruction.Opcode == TGSI_OPCODE_INTERP_SAMPLE && i == 1) ||
+             (inst->Instruction.Opcode == TGSI_OPCODE_LOAD && i == 1))
             stype = TGSI_TYPE_SIGNED;
 
          if (imd->type == TGSI_IMM_UINT32 || imd->type == TGSI_IMM_INT32) {
@@ -2798,7 +2828,7 @@ iter_instruction(struct tgsi_iterate_context *iter,
          return FALSE;
       break;
    case TGSI_OPCODE_LOAD:
-      ret = translate_load(ctx, inst, sreg_index, srcs, dsts);
+      ret = translate_load(ctx, inst, sreg_index, dstconv, srcs, dsts);
       if (ret)
          return FALSE;
       break;
@@ -2898,6 +2928,8 @@ static char *emit_header(struct dump_ctx *ctx, char *glsl_hdr)
          STRCAT_WITH_RET(glsl_hdr, "#extension GL_ARB_cull_distance : require\n");
       if (ctx->iviews_used)
 	 STRCAT_WITH_RET(glsl_hdr, "#extension GL_ARB_shader_image_load_store : require\n");
+      if (ctx->ssbo)
+         STRCAT_WITH_RET(glsl_hdr, "#extension GL_ARB_shader_storage_buffer_object : require\n");
    }
    return glsl_hdr;
 }
@@ -3444,6 +3476,18 @@ static char *emit_ios(struct dump_ctx *ctx, char *glsl_hdr)
       }
    }
 
+   if (ctx->info.indirect_files & (1 << TGSI_FILE_BUFFER)) {
+
+   } else {
+      uint32_t nbuf = util_last_bit(ctx->ssbo_used);
+      for (i = 0; i < nbuf; i++){
+         if ((ctx->ssbo_used & (1 << i)) == 0)
+            continue;
+         sname = tgsi_proc_to_prefix(ctx->prog_type);
+         snprintf(buf, 255, "layout (binding = %d) buffer %sssbo%d { uvec4 ssbocontents%d[]; };\n", i, sname, i, i);
+         STRCAT_WITH_RET(glsl_hdr, buf);
+      }
+   }
    if (ctx->prog_type == TGSI_PROCESSOR_FRAGMENT &&
        ctx->key->pstipple_tex == true) {
       snprintf(buf, 255, "uniform sampler2D pstipple_sampler;\nfloat stip_temp;\n");
@@ -3588,6 +3632,7 @@ char *vrend_convert_shader(struct vrend_shader_cfg *cfg,
    sinfo->num_cull_out = has_prop ? ctx.num_cull_dist_prop : 0;
    sinfo->samplers_used_mask = ctx.samplers_used;
    sinfo->images_used_mask = ctx.images_used;
+   sinfo->ssbo_used_mask = ctx.ssbo_used;
    sinfo->num_consts = ctx.num_consts;
    sinfo->num_ubos = ctx.num_ubo;
    sinfo->ubo_indirect = ctx.info.dimension_indirect_files & (1 << TGSI_FILE_CONSTANT);
