@@ -2989,9 +2989,10 @@ static void vrend_draw_bind_images(struct vrend_context *ctx)
 
 	 iview = &ctx->sub->image_views[shader_type][i];
 	 glUniform1i(ctx->sub->prog->img_locs[shader_type][i], i);
+	 GLboolean layered = (iview->texture->base.array_size > 1 && (iview->u.tex.first_layer == iview->u.tex.last_layer));
 	 glBindImageTexture(i, iview->texture->id,
 			    iview->u.tex.level,
-			    GL_FALSE,
+			    layered,
 			    iview->u.tex.first_layer,
 			    GL_READ_WRITE,
 			    iview->format);
