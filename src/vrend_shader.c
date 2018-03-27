@@ -64,6 +64,7 @@ struct vrend_shader_sampler {
 struct vrend_shader_image {
    struct tgsi_declaration_image decl;
    enum tgsi_return_type image_return;
+   bool vflag;
 };
 
 #define MAX_IMMEDIATE 1024
@@ -271,6 +272,7 @@ static int add_images(struct dump_ctx *ctx, int first, int last,
 
    for (i = first; i <= last; i++) {
       ctx->images[i].decl = *img_decl;
+      ctx->images[i].vflag = false;
       ctx->images_used |= (1 << i);
 
       ctx->iviews_used = true;
@@ -1822,6 +1824,9 @@ translate_atomic(struct dump_ctx *ctx,
    const char *stypecast = "";
    bool is_cas = false;
    char cas_str[64] = {};
+
+   if (inst->Memory.Qualifier == TGSI_MEMORY_VOLATILE)
+      ctx->images[sreg_index].vflag = true;
    switch (itype) {
    case TGSI_RETURN_TYPE_UINT:
       stypeprefix = "floatBitsToUint";
@@ -3404,6 +3409,7 @@ static char *emit_ios(struct dump_ctx *ctx, char *glsl_hdr)
          char ptc;
 	 if ((ctx->images_used & (1 << i)) == 0)
             continue;
+         const char *volatile_str = (ctx->images[i].vflag) ? "volatile " : "";
 	 const char *writeonly = (ctx->images[i].decl.Format) ? "" : "writeonly ";
 	 const char *formatstr;
          enum tgsi_return_type itype;
@@ -3411,7 +3417,7 @@ static char *emit_ios(struct dump_ctx *ctx, char *glsl_hdr)
          ptc = vrend_shader_samplerreturnconv(itype);
          sname = tgsi_proc_to_prefix(ctx->prog_type);
          stc = vrend_shader_samplertypeconv(ctx->images[i].decl.Resource, &is_shad);
-         snprintf(buf, 255, "%s%suniform %cimage%s %simg%d;\n", formatstr, writeonly, ptc, stc, sname, i);
+         snprintf(buf, 255, "%s%s%suniform %cimage%s %simg%d;\n", formatstr, writeonly, volatile_str, ptc, stc, sname, i);
          STRCAT_WITH_RET(glsl_hdr, buf);
       }
    }
