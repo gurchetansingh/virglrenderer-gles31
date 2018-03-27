@@ -1716,6 +1716,36 @@ create_swizzled_clipdist(struct dump_ctx *ctx,
    snprintf(result, 255, "%s(vec4(%s,%s,%s,%s))", stypeprefix, clipdistvec[0], clipdistvec[1], clipdistvec[2], clipdistvec[3]);
 }
 
+static const char *get_coord_prefix(int resource, bool *is_ms)
+{
+   switch(resource) {
+   case TGSI_TEXTURE_1D:
+   case TGSI_TEXTURE_BUFFER:
+      return "int";
+      break;
+   case TGSI_TEXTURE_2D:
+   case TGSI_TEXTURE_RECT:
+   case TGSI_TEXTURE_1D_ARRAY:
+      return "ivec2";
+      break;
+   case TGSI_TEXTURE_3D:
+   case TGSI_TEXTURE_CUBE:
+   case TGSI_TEXTURE_2D_ARRAY:
+   case TGSI_TEXTURE_CUBE_ARRAY:
+      return "ivec3";
+      break;
+   case TGSI_TEXTURE_2D_MSAA:
+      *is_ms = true;
+      return "ivec2";
+   case TGSI_TEXTURE_2D_ARRAY_MSAA:
+      *is_ms = true;
+      return "ivec3";
+   default:
+      fprintf(stderr, "NON 2D IMAGE\n");
+      return "";
+   }
+}
+
 static int
 translate_image_store(struct dump_ctx *ctx,
 		      struct tgsi_full_instruction *inst,
@@ -1723,19 +1753,39 @@ translate_image_store(struct dump_ctx *ctx,
 		      char srcs[4][255],
 		      char dsts[3][255])
 {
-      char buf[512];
-      const char *coord_prefix;
-      switch (ctx->images[sreg_index].decl.Resource) {
-      case TGSI_TEXTURE_2D:
-	 coord_prefix = "ivec2";
-	 break;
-      default:
-	 fprintf(stderr, "NON 2D IMAGE\n");
-	 return -1;
-      }
-      snprintf(buf, 255, "imageStore(%s,%s(floatBitsToInt(%s)),%s);\n", dsts[0], coord_prefix, srcs[0], srcs[1]);
-      EMIT_BUF_WITH_RET(ctx, buf);
-      return 0;
+   char buf[512];
+   bool is_ms = false;
+   const char *coord_prefix = get_coord_prefix(ctx->images[sreg_index].decl.Resource, &is_ms);
+   char ms_str[32] = {};
+
+   if (is_ms) {
+      snprintf(ms_str, 32, "int(%s.w),", srcs[0]);
+   }
+
+   snprintf(buf, 255, "imageStore(%s,%s(floatBitsToInt(%s)),%s%s);\n", dsts[0], coord_prefix, srcs[0], ms_str, srcs[1]);
+   EMIT_BUF_WITH_RET(ctx, buf);
+   return 0;
+}
+
+static int
+translate_load(struct dump_ctx *ctx,
+	       struct tgsi_full_instruction *inst,
+	       int sreg_index,
+	       char srcs[4][255],
+	       char dsts[3][255])
+{
+   char buf[512];
+   bool is_ms = false;
+   const char *coord_prefix = get_coord_prefix(ctx->images[sreg_index].decl.Resource, &is_ms);
+   char ms_str[32] = {};
+
+   if (is_ms) {
+      snprintf(ms_str, 32, ", int(%s.w)", srcs[1]);
+   }
+   snprintf(buf, 255, "%s = imageLoad(%s, %s(floatBitsToInt(%s))%s);\n", dsts[0], srcs[0], coord_prefix, srcs[1], ms_str);
+   EMIT_BUF_WITH_RET(ctx, buf);
+   return 0;
+
 }
 
 static boolean
@@ -2626,6 +2676,11 @@ iter_instruction(struct tgsi_iterate_context *iter,
       if (ret)
          return FALSE;
       break;
+   case TGSI_OPCODE_LOAD:
+      ret = translate_load(ctx, inst, sreg_index, srcs, dsts);
+      if (ret)
+         return FALSE;
+      break;
    default:
       fprintf(stderr,"failed to convert opcode %d\n", inst->Instruction.Opcode);
       break;
@@ -2776,6 +2831,136 @@ static const char get_return_type_prefix(enum tgsi_return_type type)
    if (type == TGSI_RETURN_TYPE_UINT)
       return 'u';
    return ' ';
+}
+
+const char *get_internalformat_string(int virgl_format, enum tgsi_return_type *stype)
+{
+   switch (virgl_format) {
+   case PIPE_FORMAT_R11G11B10_FLOAT:
+      *stype = TGSI_RETURN_TYPE_FLOAT;
+      return "layout(r11f_g11f_b10f) ";
+   case PIPE_FORMAT_R10G10B10A2_UNORM:
+      *stype = TGSI_RETURN_TYPE_UNORM;
+      return "layout(rgb10_a2) ";
+   case PIPE_FORMAT_R10G10B10A2_UINT:
+      *stype = TGSI_RETURN_TYPE_UINT;
+      return "layout(rgb10_a2ui) ";
+   case PIPE_FORMAT_R8_UNORM:
+      *stype = TGSI_RETURN_TYPE_UNORM;
+      return "layout(r8) ";
+   case PIPE_FORMAT_R8_SNORM:
+      *stype = TGSI_RETURN_TYPE_SNORM;
+      return "layout(r8_snorm) ";
+   case PIPE_FORMAT_R8_UINT:
+      *stype = TGSI_RETURN_TYPE_UINT;
+      return "layout(r8ui) ";
+   case PIPE_FORMAT_R8_SINT:
+      *stype = TGSI_RETURN_TYPE_SINT;
+      return "layout(r8i) ";
+   case PIPE_FORMAT_R8G8_UNORM:
+      *stype = TGSI_RETURN_TYPE_UNORM;
+      return "layout(rg8) ";
+   case PIPE_FORMAT_R8G8_SNORM:
+      *stype = TGSI_RETURN_TYPE_SNORM;
+      return "layout(rg8_snorm) ";
+   case PIPE_FORMAT_R8G8_UINT:
+      *stype = TGSI_RETURN_TYPE_UINT;
+      return "layout(rg8ui) ";
+   case PIPE_FORMAT_R8G8_SINT:
+      *stype = TGSI_RETURN_TYPE_SINT;
+      return "layout(rg8i) ";
+   case PIPE_FORMAT_R8G8B8A8_UNORM:
+      *stype = TGSI_RETURN_TYPE_UNORM;
+      return "layout(rgba8) ";
+   case PIPE_FORMAT_R8G8B8A8_SNORM:
+      *stype = TGSI_RETURN_TYPE_SNORM;
+      return "layout(rgba8_snorm) ";
+   case PIPE_FORMAT_R8G8B8A8_UINT:
+      *stype = TGSI_RETURN_TYPE_UINT;
+      return "layout(rgba8ui) ";
+   case PIPE_FORMAT_R8G8B8A8_SINT:
+      *stype = TGSI_RETURN_TYPE_SINT;
+      return "layout(rgba8i) ";
+   case PIPE_FORMAT_R16_UNORM:
+      *stype = TGSI_RETURN_TYPE_UNORM;
+      return "layout(r16) ";
+   case PIPE_FORMAT_R16_SNORM:
+      *stype = TGSI_RETURN_TYPE_SNORM;
+      return "layout(r16_snorm) ";
+   case PIPE_FORMAT_R16_UINT:
+      *stype = TGSI_RETURN_TYPE_UINT;
+      return "layout(r16ui) ";
+   case PIPE_FORMAT_R16_SINT:
+      *stype = TGSI_RETURN_TYPE_SINT;
+      return "layout(r16i) ";
+   case PIPE_FORMAT_R16_FLOAT:
+      *stype = TGSI_RETURN_TYPE_FLOAT;
+      return "layout(r16f) ";
+   case PIPE_FORMAT_R16G16_UNORM:
+      *stype = TGSI_RETURN_TYPE_UNORM;
+      return "layout(rg16) ";
+   case PIPE_FORMAT_R16G16_SNORM:
+      *stype = TGSI_RETURN_TYPE_SNORM;
+      return "layout(rg16_snorm) ";
+   case PIPE_FORMAT_R16G16_UINT:
+      *stype = TGSI_RETURN_TYPE_UINT;
+      return "layout(rg16ui) ";
+   case PIPE_FORMAT_R16G16_SINT:
+      *stype = TGSI_RETURN_TYPE_SINT;
+      return "layout(rg16i) ";
+   case PIPE_FORMAT_R16G16_FLOAT:
+      *stype = TGSI_RETURN_TYPE_FLOAT;
+      return "layout(rg16f) ";
+   case PIPE_FORMAT_R16G16B16A16_UNORM:
+      *stype = TGSI_RETURN_TYPE_UNORM;
+      return "layout(rgba16) ";
+   case PIPE_FORMAT_R16G16B16A16_SNORM:
+      *stype = TGSI_RETURN_TYPE_SNORM;
+      return "layout(rgba16_snorm) ";
+   case PIPE_FORMAT_R16G16B16A16_FLOAT:
+      *stype = TGSI_RETURN_TYPE_FLOAT;
+      return "layout(rgba16f) ";
+   case PIPE_FORMAT_R32_FLOAT:
+      *stype = TGSI_RETURN_TYPE_FLOAT;
+      return "layout(r32f) ";
+   case PIPE_FORMAT_R32_UINT:
+      *stype = TGSI_RETURN_TYPE_UINT;
+      return "layout(r32ui) ";
+   case PIPE_FORMAT_R32_SINT:
+      *stype = TGSI_RETURN_TYPE_SINT;
+      return "layout(r32i) ";
+   case PIPE_FORMAT_R32G32_FLOAT:
+      *stype = TGSI_RETURN_TYPE_FLOAT;
+      return "layout(rg32f) ";
+   case PIPE_FORMAT_R32G32_UINT:
+      *stype = TGSI_RETURN_TYPE_UINT;
+      return "layout(rg32ui) ";
+   case PIPE_FORMAT_R32G32_SINT:
+      *stype = TGSI_RETURN_TYPE_SINT;
+      return "layout(rg32i) ";
+   case PIPE_FORMAT_R32G32B32A32_FLOAT:
+      *stype = TGSI_RETURN_TYPE_FLOAT;
+      return "layout(rgba32f) ";
+   case PIPE_FORMAT_R32G32B32A32_UINT:
+      *stype = TGSI_RETURN_TYPE_UINT;
+      return "layout(rgba32ui) ";
+   case PIPE_FORMAT_R16G16B16A16_UINT:
+      *stype = TGSI_RETURN_TYPE_UINT;
+      return "layout(rgba16ui) ";
+   case PIPE_FORMAT_R16G16B16A16_SINT:
+      *stype = TGSI_RETURN_TYPE_SINT;
+      return "layout(rgba16i) ";
+   case PIPE_FORMAT_R32G32B32A32_SINT:
+      *stype = TGSI_RETURN_TYPE_SINT;
+      return "layout(rgba32i) ";
+   case PIPE_FORMAT_NONE:
+      *stype = TGSI_RETURN_TYPE_UNORM;
+      return "";
+   default:
+      *stype = TGSI_RETURN_TYPE_UNORM;
+      fprintf(stderr, "illegal format %d\n", virgl_format);
+      return "";
+   }
 }
 
 static char *emit_ios(struct dump_ctx *ctx, char *glsl_hdr)
@@ -3102,12 +3287,19 @@ static char *emit_ios(struct dump_ctx *ctx, char *glsl_hdr)
    } else {
       int nimg = util_last_bit(ctx->images_used);
       for (i = 0; i < nimg; i++) {
-
+         int is_shad = 0;
+         const char *stc;
+         char ptc;
 	 if ((ctx->images_used & (1 << i)) == 0)
             continue;
 	 const char *writeonly = (ctx->images[i].decl.Format) ? "" : "writeonly ";
+	 const char *formatstr;
+         enum tgsi_return_type itype;
+	 formatstr = get_internalformat_string(ctx->images[i].decl.Format, &itype);
+         ptc = vrend_shader_samplerreturnconv(itype);
          sname = tgsi_proc_to_prefix(ctx->prog_type);
-         snprintf(buf, 255, "%suniform image2D %simg%d;\n", writeonly, sname, i);
+         stc = vrend_shader_samplertypeconv(ctx->images[i].decl.Resource, &is_shad);
+         snprintf(buf, 255, "%s%suniform %cimage%s %simg%d;\n", formatstr, writeonly, ptc, stc, sname, i);
          STRCAT_WITH_RET(glsl_hdr, buf);
       }
    }
