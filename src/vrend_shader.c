@@ -275,6 +275,15 @@ static int add_images(struct dump_ctx *ctx, int first, int last,
       ctx->images[i].vflag = false;
       ctx->images_used |= (1 << i);
 
+      if (ctx->images[i].decl.Resource == TGSI_TEXTURE_CUBE_ARRAY)
+         ctx->uses_cube_array = true;
+      else if (ctx->images[i].decl.Resource == TGSI_TEXTURE_2D_MSAA ||
+          ctx->images[i].decl.Resource == TGSI_TEXTURE_2D_ARRAY_MSAA)
+         ctx->uses_sampler_ms = true;
+      else if (ctx->images[i].decl.Resource == TGSI_TEXTURE_BUFFER)
+         ctx->uses_sampler_buf = true;
+      else if (ctx->images[i].decl.Resource == TGSI_TEXTURE_RECT)
+         ctx->uses_sampler_rect = true;
       ctx->iviews_used = true;
    }
 }
