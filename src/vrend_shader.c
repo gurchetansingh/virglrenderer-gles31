@@ -1804,12 +1804,22 @@ translate_load(struct dump_ctx *ctx,
    char buf[512];
    bool is_ms = false;
    const char *coord_prefix = get_coord_prefix(ctx->images[sreg_index].decl.Resource, &is_ms);
+   enum tgsi_return_type itype;
+   const char *formatstr = get_internalformat_string(ctx->images[sreg_index].decl.Format, &itype);
    char ms_str[32] = {};
-
+   const char *dtypeprefix = "";
    if (is_ms) {
       snprintf(ms_str, 32, ", int(%s.w)", srcs[1]);
    }
-   snprintf(buf, 255, "%s = imageLoad(%s, %s(floatBitsToInt(%s))%s);\n", dsts[0], srcs[0], coord_prefix, srcs[1], ms_str);
+   switch (itype) {
+   case TGSI_RETURN_TYPE_UINT:
+      dtypeprefix = "uintBitsToFloat";
+      break;
+   case TGSI_RETURN_TYPE_SINT:
+      dtypeprefix = "intBitsToFloat";
+      break;
+   }
+   snprintf(buf, 255, "%s = %s(imageLoad(%s, %s(floatBitsToInt(%s))%s));\n", dsts[0], dtypeprefix, srcs[0], coord_prefix, srcs[1], ms_str);
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 
@@ -1830,6 +1840,7 @@ translate_atomic(struct dump_ctx *ctx,
    char ms_str[32] = {};
    const char *opname;
    const char *stypeprefix = "";
+   const char *dtypeprefix = "";
    const char *stypecast = "";
    bool is_cas = false;
    char cas_str[64] = {};
@@ -1839,10 +1850,12 @@ translate_atomic(struct dump_ctx *ctx,
    switch (itype) {
    case TGSI_RETURN_TYPE_UINT:
       stypeprefix = "floatBitsToUint";
+      dtypeprefix = "uintBitsToFloat";
       stypecast = "uint";
       break;
    case TGSI_RETURN_TYPE_SINT:
       stypeprefix = "floatBitsToInt";
+      dtypeprefix = "floatBitstoUint";
       stypecast = "int";
       break;
    }
@@ -1889,7 +1902,7 @@ translate_atomic(struct dump_ctx *ctx,
 
    if (is_cas)
       snprintf(cas_str, 64, ", %s(%s(%s))", stypecast, stypeprefix, srcs[3]);
-   snprintf(buf, 512, "%s = image%s(%s, %s(floatBitsToInt(%s))%s, %s(%s(%s))%s);\n", dsts[0], opname, srcs[0], coord_prefix, srcs[1], ms_str, stypecast, stypeprefix, srcs[2], cas_str);
+   snprintf(buf, 512, "%s = %s(image%s(%s, %s(floatBitsToInt(%s))%s, %s(%s(%s))%s));\n", dsts[0], dtypeprefix, opname, srcs[0], coord_prefix, srcs[1], ms_str, stypecast, stypeprefix, srcs[2], cas_str);
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 
