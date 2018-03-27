@@ -63,6 +63,7 @@ struct vrend_shader_sampler {
 
 struct vrend_shader_image {
    struct tgsi_declaration_image decl;
+   enum tgsi_return_type image_return;
 };
 
 #define MAX_IMMEDIATE 1024
@@ -167,6 +168,7 @@ struct dump_ctx {
    bool write_interp_temp;
 };
 
+const char *get_internalformat_string(int virgl_format, enum tgsi_return_type *stype);
 static inline const char *tgsi_proc_to_prefix(int shader_type)
 {
    switch (shader_type) {
@@ -1756,13 +1758,23 @@ translate_image_store(struct dump_ctx *ctx,
    char buf[512];
    bool is_ms = false;
    const char *coord_prefix = get_coord_prefix(ctx->images[sreg_index].decl.Resource, &is_ms);
+   enum tgsi_return_type itype;
+   const char *formatstr = get_internalformat_string(ctx->images[sreg_index].decl.Format, &itype);
    char ms_str[32] = {};
-
+   const char *stypeprefix = "";
    if (is_ms) {
       snprintf(ms_str, 32, "int(%s.w),", srcs[0]);
    }
+   switch (itype) {
+   case TGSI_RETURN_TYPE_UINT:
+      stypeprefix = "floatBitsToUint";
+      break;
+   case TGSI_RETURN_TYPE_SINT:
+      stypeprefix = "floatBitsToInt";
+      break;
+   }
 
-   snprintf(buf, 255, "imageStore(%s,%s(floatBitsToInt(%s)),%s%s);\n", dsts[0], coord_prefix, srcs[0], ms_str, srcs[1]);
+   snprintf(buf, 255, "imageStore(%s,%s(floatBitsToInt(%s)),%s%s(%s));\n", dsts[0], coord_prefix, srcs[0], ms_str, stypeprefix, srcs[1]);
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 }
