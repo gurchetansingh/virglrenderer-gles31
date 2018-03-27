@@ -1800,6 +1800,84 @@ translate_load(struct dump_ctx *ctx,
 
 }
 
+static int
+translate_atomic(struct dump_ctx *ctx,
+                 struct tgsi_full_instruction *inst,
+                 int sreg_index,
+                 char srcs[4][255],
+                 char dsts[3][255])
+{
+   char buf[512];
+   bool is_ms = false;
+   const char *coord_prefix = get_coord_prefix(ctx->images[sreg_index].decl.Resource, &is_ms);
+   enum tgsi_return_type itype;
+   const char *formatstr = get_internalformat_string(ctx->images[sreg_index].decl.Format, &itype);
+   char ms_str[32] = {};
+   const char *opname;
+   const char *stypeprefix = "";
+   const char *stypecast = "";
+   bool is_cas = false;
+   char cas_str[64] = {};
+   switch (itype) {
+   case TGSI_RETURN_TYPE_UINT:
+      stypeprefix = "floatBitsToUint";
+      stypecast = "uint";
+      break;
+   case TGSI_RETURN_TYPE_SINT:
+      stypeprefix = "floatBitsToInt";
+      stypecast = "int";
+      break;
+   }
+   switch (inst->Instruction.Opcode) {
+   case TGSI_OPCODE_ATOMUADD:
+      opname = "AtomicAdd";
+      break;
+   case TGSI_OPCODE_ATOMXCHG:
+      opname = "AtomicExchange";
+      break;
+   case TGSI_OPCODE_ATOMCAS:
+      opname = "AtomicCompSwap";
+      is_cas = true;
+      break;
+   case TGSI_OPCODE_ATOMAND:
+      opname = "AtomicAnd";
+      break;
+   case TGSI_OPCODE_ATOMOR:
+      opname = "AtomicOr";
+      break;
+   case TGSI_OPCODE_ATOMXOR:
+      opname = "AtomicXor";
+      break;
+   case TGSI_OPCODE_ATOMUMIN:
+      opname = "AtomicMin";
+      break;
+   case TGSI_OPCODE_ATOMUMAX:
+      opname = "AtomicMax";
+      break;
+   case TGSI_OPCODE_ATOMIMIN:
+      opname = "AtomicMin";
+      break;
+   case TGSI_OPCODE_ATOMIMAX:
+      opname = "AtomicMax";
+      break;
+   default:
+      fprintf(stderr, "illegal atomic opcode");
+      return -1;
+   }
+
+   if (is_ms) {
+      snprintf(ms_str, 32, ", int(%s.w)", srcs[1]);
+   }
+
+   if (is_cas)
+      snprintf(cas_str, 64, ", %s(%s(%s))", stypecast, stypeprefix, srcs[3]);
+   snprintf(buf, 512, "%s = image%s(%s, %s(floatBitsToInt(%s))%s, %s(%s(%s))%s);\n", dsts[0], opname, srcs[0], coord_prefix, srcs[1], ms_str, stypecast, stypeprefix, srcs[2], cas_str);
+   EMIT_BUF_WITH_RET(ctx, buf);
+   return 0;
+
+
+}
+
 static boolean
 iter_instruction(struct tgsi_iterate_context *iter,
                  struct tgsi_full_instruction *inst)
@@ -2690,6 +2768,20 @@ iter_instruction(struct tgsi_iterate_context *iter,
       break;
    case TGSI_OPCODE_LOAD:
       ret = translate_load(ctx, inst, sreg_index, srcs, dsts);
+      if (ret)
+         return FALSE;
+      break;
+   case TGSI_OPCODE_ATOMUADD:
+   case TGSI_OPCODE_ATOMXCHG:
+   case TGSI_OPCODE_ATOMCAS:
+   case TGSI_OPCODE_ATOMAND:
+   case TGSI_OPCODE_ATOMOR:
+   case TGSI_OPCODE_ATOMXOR:
+   case TGSI_OPCODE_ATOMUMIN:
+   case TGSI_OPCODE_ATOMUMAX:
+   case TGSI_OPCODE_ATOMIMIN:
+   case TGSI_OPCODE_ATOMIMAX:
+      ret = translate_atomic(ctx, inst, sreg_index, srcs, dsts);
       if (ret)
          return FALSE;
       break;
