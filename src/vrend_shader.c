@@ -166,6 +166,7 @@ struct dump_ctx {
    bool uses_gpu_shader5;
    bool write_mul_temp;
    bool write_interp_temp;
+   bool early_depth_stencil;
 };
 
 const char *get_internalformat_string(int virgl_format, enum tgsi_return_type *stype);
@@ -866,6 +867,9 @@ iter_property(struct tgsi_iterate_context *iter,
    if (prop->Property.PropertyName == TGSI_PROPERTY_NUM_CULLDIST_ENABLED) {
       ctx->num_cull_dist_prop = prop->u[0].Data;
    }
+   if (prop->Property.PropertyName == TGSI_PROPERTY_FS_EARLY_DEPTH_STENCIL)
+      ctx->early_depth_stencil = prop->u[0].Data > 0;
+
    return TRUE;
 }
 
@@ -3096,6 +3100,10 @@ static char *emit_ios(struct dump_ctx *ctx, char *glsl_hdr)
                   upper_left ? "origin_upper_left" : "",
                   comma,
                   ctx->fs_pixel_center ? "pixel_center_integer" : "");
+         STRCAT_WITH_RET(glsl_hdr, buf);
+      }
+      if (ctx->early_depth_stencil) {
+         snprintf(buf, 255, "layout(early_fragment_tests) in;\n");
          STRCAT_WITH_RET(glsl_hdr, buf);
       }
    }
