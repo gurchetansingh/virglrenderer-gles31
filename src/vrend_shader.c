@@ -174,6 +174,7 @@ struct dump_ctx {
    bool write_mul_temp;
    bool write_interp_temp;
    bool early_depth_stencil;
+   uint16_t local_cs_block_size[3];
    bool ssbo;
 };
 
@@ -184,6 +185,7 @@ static inline const char *tgsi_proc_to_prefix(int shader_type)
    case TGSI_PROCESSOR_VERTEX: return "vs";
    case TGSI_PROCESSOR_FRAGMENT: return "fs";
    case TGSI_PROCESSOR_GEOMETRY: return "gs";
+   case TGSI_PROCESSOR_COMPUTE: return "cs";
    default:
       return NULL;
    };
@@ -896,6 +898,12 @@ iter_property(struct tgsi_iterate_context *iter,
    if (prop->Property.PropertyName == TGSI_PROPERTY_FS_EARLY_DEPTH_STENCIL)
       ctx->early_depth_stencil = prop->u[0].Data > 0;
 
+   if (prop->Property.PropertyName == TGSI_PROPERTY_CS_FIXED_BLOCK_WIDTH)
+      ctx->local_cs_block_size[0] = prop->u[0].Data;
+   if (prop->Property.PropertyName == TGSI_PROPERTY_CS_FIXED_BLOCK_HEIGHT)
+      ctx->local_cs_block_size[1] = prop->u[0].Data;
+   if (prop->Property.PropertyName == TGSI_PROPERTY_CS_FIXED_BLOCK_DEPTH)
+      ctx->local_cs_block_size[2] = prop->u[0].Data;
    return TRUE;
 }
 
@@ -2884,7 +2892,10 @@ static char *emit_header(struct dump_ctx *ctx, char *glsl_hdr)
       STRCAT_WITH_RET(glsl_hdr, "#version 300 es\n");
       STRCAT_WITH_RET(glsl_hdr, "precision highp float;\n");
    } else {
-      if (ctx->prog_type == TGSI_PROCESSOR_GEOMETRY || ctx->glsl_ver_required == 150)
+      if (ctx->prog_type == TGSI_PROCESSOR_COMPUTE) {
+         STRCAT_WITH_RET(glsl_hdr, "#version 330\n");
+	 STRCAT_WITH_RET(glsl_hdr, "#extension GL_ARB_compute_shader : require\n");
+      } else if (ctx->prog_type == TGSI_PROCESSOR_GEOMETRY || ctx->glsl_ver_required == 150)
          STRCAT_WITH_RET(glsl_hdr, "#version 150\n");
       else if (ctx->glsl_ver_required == 140)
          STRCAT_WITH_RET(glsl_hdr, "#version 140\n");
@@ -3166,6 +3177,13 @@ static char *emit_ios(struct dump_ctx *ctx, char *glsl_hdr)
          STRCAT_WITH_RET(glsl_hdr, buf);
       }
    }
+
+   if (ctx->prog_type == TGSI_PROCESSOR_COMPUTE) {
+      snprintf(buf, 255, "layout (local_size_x = %d, local_size_y = %d, local_size_z = %d) in;\n",
+	       ctx->local_cs_block_size[0], ctx->local_cs_block_size[1], ctx->local_cs_block_size[2]);
+      STRCAT_WITH_RET(glsl_hdr, buf);
+   }
+
    if (ctx->prog_type == TGSI_PROCESSOR_GEOMETRY) {
       char invocbuf[25];
 

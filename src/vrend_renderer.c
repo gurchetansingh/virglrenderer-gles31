@@ -331,6 +331,7 @@ struct vrend_sub_context {
 
    bool vbo_dirty;
    bool shader_dirty;
+   bool cs_shader_dirty;
    bool sampler_state_dirty;
    bool stencil_state_dirty;
    bool image_state_dirty;
@@ -485,6 +486,7 @@ static inline const char *pipe_shader_to_prefix(int shader_type)
    case PIPE_SHADER_VERTEX: return "vs";
    case PIPE_SHADER_FRAGMENT: return "fs";
    case PIPE_SHADER_GEOMETRY: return "gs";
+   case PIPE_SHADER_COMPUTE: return "cs";
    default:
       return NULL;
    };
@@ -882,6 +884,37 @@ static void set_stream_out_varyings(int prog_id, struct vrend_shader_info *sinfo
          free(varyings[i]);
 }
 
+static struct vrend_linked_shader_program *add_cs_shader_program(struct vrend_context *ctx,
+								 struct vrend_shader *cs)
+{
+   struct vrend_linked_shader_program *sprog = CALLOC_STRUCT(vrend_linked_shader_program);
+   GLuint prog_id;
+   GLint lret;
+   prog_id = glCreateProgram();
+   glAttachShader(prog_id, cs->id);
+   glLinkProgram(prog_id);
+
+   glGetProgramiv(prog_id, GL_LINK_STATUS, &lret);
+   if (lret == GL_FALSE) {
+      char infolog[65536];
+      int len;
+      glGetProgramInfoLog(prog_id, 65536, &len, infolog);
+      fprintf(stderr,"got error linking\n%s\n", infolog);
+      /* dump shaders */
+      report_context_error(ctx, VIRGL_ERROR_CTX_ILLEGAL_SHADER, 0);
+      fprintf(stderr,"compute shader: %d GLSL\n%s\n", cs->id, cs->glsl_prog);
+      glDeleteProgram(prog_id);
+      free(sprog);
+      return NULL;
+   }
+   sprog->ss[PIPE_SHADER_COMPUTE] = cs;
+
+   list_add(&sprog->sl[PIPE_SHADER_COMPUTE], &cs->programs);
+   sprog->id = prog_id;
+   list_addtail(&sprog->head, &ctx->sub->programs);
+   return sprog;
+}
+
 static struct vrend_linked_shader_program *add_shader_program(struct vrend_context *ctx,
                                                               struct vrend_shader *vs,
                                                               struct vrend_shader *fs,
@@ -1108,6 +1141,19 @@ static struct vrend_linked_shader_program *add_shader_program(struct vrend_conte
       }
    }
    return sprog;
+}
+
+static struct vrend_linked_shader_program *lookup_cs_shader_program(struct vrend_context *ctx,
+								    GLuint cs_id)
+{
+   struct vrend_linked_shader_program *ent;
+   LIST_FOR_EACH_ENTRY(ent, &ctx->sub->programs, head) {
+      if (!ent->ss[PIPE_SHADER_COMPUTE])
+	 continue;
+      if (ent->ss[PIPE_SHADER_COMPUTE]->id == cs_id)
+	 return ent;
+   }
+   return NULL;
 }
 
 static struct vrend_linked_shader_program *lookup_shader_program(struct vrend_context *ctx,
@@ -2185,6 +2231,7 @@ void vrend_memory_barrier(struct vrend_context *ctx,
    glMemoryBarrier(GL_ALL_BARRIER_BITS);
 }
 
+
 static void vrend_destroy_shader_object(void *obj_ptr)
 {
    struct vrend_shader_selector *state = obj_ptr;
@@ -2242,6 +2289,7 @@ static inline int conv_shader_type(int type)
    case PIPE_SHADER_VERTEX: return GL_VERTEX_SHADER;
    case PIPE_SHADER_FRAGMENT: return GL_FRAGMENT_SHADER;
    case PIPE_SHADER_GEOMETRY: return GL_GEOMETRY_SHADER;
+   case PIPE_SHADER_COMPUTE: return GL_COMPUTE_SHADER;
    default:
       return 0;
    };
@@ -2369,7 +2417,7 @@ int vrend_create_shader(struct vrend_context *ctx,
    bool finished = false;
    int ret;
 
-   if (type > PIPE_SHADER_GEOMETRY)
+   if (type > PIPE_SHADER_GEOMETRY && type != PIPE_SHADER_COMPUTE)
       return EINVAL;
 
    if (offlen & VIRGL_OBJ_SHADER_OFFSET_CONT)
@@ -2496,11 +2544,14 @@ void vrend_bind_shader(struct vrend_context *ctx,
 {
    struct vrend_shader_selector *sel;
 
-   if (type > PIPE_SHADER_GEOMETRY)
+   if (type > PIPE_SHADER_GEOMETRY && type != PIPE_SHADER_COMPUTE)
       return;
 
    if (handle == 0) {
-      ctx->sub->shader_dirty = true;
+      if (type == PIPE_SHADER_COMPUTE)
+	 ctx->sub->cs_shader_dirty = true;
+      else
+	 ctx->sub->shader_dirty = true;
       vrend_shader_state_reference(&ctx->sub->shaders[type], NULL);
       return;
    }
@@ -2513,7 +2564,10 @@ void vrend_bind_shader(struct vrend_context *ctx,
       return;
 
    if (ctx->sub->shaders[sel->type] != sel) {
-      ctx->sub->shader_dirty = true;
+      if (type == PIPE_SHADER_COMPUTE)
+	 ctx->sub->cs_shader_dirty = true;
+      else
+	 ctx->sub->shader_dirty = true;
       ctx->sub->prog_ids[sel->type] = 0;
    }
 
@@ -3239,6 +3293,54 @@ void vrend_draw_vbo(struct vrend_context *ctx,
          glPauseTransformFeedback();
          ctx->sub->current_so->xfb_state = XFB_STATE_PAUSED;
       }
+   }
+}
+
+void vrend_launch_grid(struct vrend_context *ctx,
+		       uint32_t *block,
+		       uint32_t *grid,
+		       uint32_t indirect_handle,
+		       uint32_t indirect_offset)
+{
+   struct vrend_linked_shader_program *prog;
+   bool new_program = false;
+   if (ctx->sub->cs_shader_dirty) {
+      struct vrend_linked_shader_program *prog;
+      bool same_prog, cs_dirty;
+      if (!ctx->sub->shaders[PIPE_SHADER_COMPUTE]) {
+	 fprintf(stderr,"dropping rendering due to missing shaders: %s\n", ctx->debug_name);
+         return;
+      }
+
+      vrend_shader_select(ctx, ctx->sub->shaders[PIPE_SHADER_COMPUTE], &cs_dirty);
+      if (!ctx->sub->shaders[PIPE_SHADER_COMPUTE]->current) {
+	 fprintf(stderr, "failure to compile shader variants: %s\n", ctx->debug_name);
+         return;
+      }
+      same_prog = true;
+      if (ctx->sub->shaders[PIPE_SHADER_COMPUTE]->current->id != ctx->sub->prog_ids[PIPE_SHADER_COMPUTE])
+	 same_prog = false;
+      if (!same_prog) {
+	 prog = lookup_cs_shader_program(ctx, ctx->sub->shaders[PIPE_SHADER_COMPUTE]->current->id);
+	 if (!prog) {
+	    prog = add_cs_shader_program(ctx, ctx->sub->shaders[PIPE_SHADER_COMPUTE]->current);
+	    if (!prog)
+	       return;
+	 }
+      } else
+	 prog = ctx->sub->prog;
+
+      if (ctx->sub->prog != prog) {
+	 new_program = true;
+	 ctx->sub->prog_ids[PIPE_SHADER_COMPUTE] = ctx->sub->shaders[PIPE_SHADER_COMPUTE]->current->id;
+	 ctx->sub->prog = prog;
+      }
+   }
+   vrend_use_program(ctx, ctx->sub->prog->id);
+
+   if (indirect_handle) {
+   } else {
+      glDispatchCompute(grid[0], grid[1], grid[2]);
    }
 }
 
@@ -4408,6 +4510,7 @@ static void vrend_destroy_sub_context(struct vrend_sub_context *sub)
    vrend_shader_state_reference(&sub->shaders[PIPE_SHADER_VERTEX], NULL);
    vrend_shader_state_reference(&sub->shaders[PIPE_SHADER_FRAGMENT], NULL);
    vrend_shader_state_reference(&sub->shaders[PIPE_SHADER_GEOMETRY], NULL);
+   vrend_shader_state_reference(&sub->shaders[PIPE_SHADER_COMPUTE], NULL);
 
    vrend_free_programs(sub);
    for (i = 0; i < PIPE_SHADER_TYPES; i++) {
@@ -4459,6 +4562,7 @@ bool vrend_destroy_context(struct vrend_context *ctx)
    vrend_set_num_sampler_views(ctx, PIPE_SHADER_VERTEX, 0, 0);
    vrend_set_num_sampler_views(ctx, PIPE_SHADER_FRAGMENT, 0, 0);
    vrend_set_num_sampler_views(ctx, PIPE_SHADER_GEOMETRY, 0, 0);
+   vrend_set_num_sampler_views(ctx, PIPE_SHADER_COMPUTE, 0, 0);
 
    vrend_set_streamout_targets(ctx, 0, 0, NULL);
    vrend_set_num_vbo(ctx, 0);
