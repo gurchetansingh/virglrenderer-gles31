@@ -839,6 +839,9 @@ iter_declaration(struct tgsi_iterate_context *iter,
       } else if (decl->Semantic.Name == TGSI_SEMANTIC_VERTICESIN) {
          name_prefix = "gl_PatchVerticesIn";
          ctx->system_values[i].override_no_wm = false;
+      } else if (decl->Semantic.Name == TGSI_SEMANTIC_THREAD_ID) {
+	 name_prefix = "gl_LocalInvocationIndex";
+	 ctx->system_values[i].override_no_wm = false;
       } else {
          fprintf(stderr, "unsupported system value %d\n", decl->Semantic.Name);
          name_prefix = "unknown";
@@ -1793,6 +1796,7 @@ translate_image_store(struct dump_ctx *ctx,
 		      char srcs[4][255],
 		      char dsts[3][255])
 {
+   const struct tgsi_full_dst_register *dst = &inst->Dst[0];
    char buf[512];
    bool is_ms = false;
    const char *coord_prefix = get_coord_prefix(ctx->images[sreg_index].decl.Resource, &is_ms);
@@ -1812,7 +1816,10 @@ translate_image_store(struct dump_ctx *ctx,
       break;
    }
 
-   snprintf(buf, 255, "imageStore(%s,%s(floatBitsToInt(%s)),%s%s(%s));\n", dsts[0], coord_prefix, srcs[0], ms_str, stypeprefix, srcs[1]);
+   if (dst->Register.File == TGSI_FILE_IMAGE)
+      snprintf(buf, 255, "imageStore(%s,%s(floatBitsToInt(%s)),%s%s(%s));\n", dsts[0], coord_prefix, srcs[0], ms_str, stypeprefix, srcs[1]);
+   else
+      snprintf(buf, 255, "%s[int(%s)>>4] = floatBitsToUint(%s);\n", dsts[0], srcs[1], srcs[0]);
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 }
@@ -1860,6 +1867,7 @@ translate_atomic(struct dump_ctx *ctx,
                  char srcs[4][255],
                  char dsts[3][255])
 {
+   const struct tgsi_full_src_register *src = &inst->Src[0];
    char buf[512];
    bool is_ms = false;
    const char *coord_prefix = get_coord_prefix(ctx->images[sreg_index].decl.Resource, &is_ms);
@@ -1889,35 +1897,35 @@ translate_atomic(struct dump_ctx *ctx,
    }
    switch (inst->Instruction.Opcode) {
    case TGSI_OPCODE_ATOMUADD:
-      opname = "AtomicAdd";
+      opname = "Add";
       break;
    case TGSI_OPCODE_ATOMXCHG:
-      opname = "AtomicExchange";
+      opname = "Exchange";
       break;
    case TGSI_OPCODE_ATOMCAS:
-      opname = "AtomicCompSwap";
+      opname = "CompSwap";
       is_cas = true;
       break;
    case TGSI_OPCODE_ATOMAND:
-      opname = "AtomicAnd";
+      opname = "And";
       break;
    case TGSI_OPCODE_ATOMOR:
-      opname = "AtomicOr";
+      opname = "Or";
       break;
    case TGSI_OPCODE_ATOMXOR:
-      opname = "AtomicXor";
+      opname = "Xor";
       break;
    case TGSI_OPCODE_ATOMUMIN:
-      opname = "AtomicMin";
+      opname = "Min";
       break;
    case TGSI_OPCODE_ATOMUMAX:
-      opname = "AtomicMax";
+      opname = "Max";
       break;
    case TGSI_OPCODE_ATOMIMIN:
-      opname = "AtomicMin";
+      opname = "Min";
       break;
    case TGSI_OPCODE_ATOMIMAX:
-      opname = "AtomicMax";
+      opname = "Max";
       break;
    default:
       fprintf(stderr, "illegal atomic opcode");
@@ -1930,7 +1938,11 @@ translate_atomic(struct dump_ctx *ctx,
 
    if (is_cas)
       snprintf(cas_str, 64, ", %s(%s(%s))", stypecast, stypeprefix, srcs[3]);
-   snprintf(buf, 512, "%s = %s(image%s(%s, %s(floatBitsToInt(%s))%s, %s(%s(%s))%s));\n", dsts[0], dtypeprefix, opname, srcs[0], coord_prefix, srcs[1], ms_str, stypecast, stypeprefix, srcs[2], cas_str);
+
+   if (src->Register.File == TGSI_FILE_IMAGE)
+      snprintf(buf, 512, "%s = %s(imageAtomic%s(%s, %s(floatBitsToInt(%s))%s, %s(%s(%s))%s));\n", dsts[0], dtypeprefix, opname, srcs[0], coord_prefix, srcs[1], ms_str, stypecast, stypeprefix, srcs[2], cas_str);
+   else
+      snprintf(buf, 512, "%s = %s(atomic%s(%s[int(%s) >> 4].x, uint(%s.x)));\n", dsts[0], dtypeprefix, opname, srcs[0], srcs[1], srcs[2]);
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 
@@ -2090,6 +2102,15 @@ iter_instruction(struct tgsi_iterate_context *iter,
             snprintf(dsts[i], 255, "%simg[%d]", cname, dst->Register.Index);
 	 } else
 	    snprintf(dsts[i], 255, "%simg%d", cname, dst->Register.Index);
+	 sreg_index = dst->Register.Index;
+      }
+      else if (dst->Register.File == TGSI_FILE_BUFFER) {
+	 const char *cname = tgsi_proc_to_prefix(ctx->prog_type);
+	 if (dst->Register.Indirect) {
+            assert(dst->Indirect.File == TGSI_FILE_ADDRESS);
+            snprintf(dsts[i], 255, "%sssbocontents[%d]", cname, dst->Register.Index);
+	 } else
+	    snprintf(dsts[i], 255, "ssbocontents%d", dst->Register.Index);
 	 sreg_index = dst->Register.Index;
       }
       else if (dst->Register.File == TGSI_FILE_ADDRESS) {
@@ -2273,7 +2294,9 @@ iter_instruction(struct tgsi_iterate_context *iter,
 
          if ((inst->Instruction.Opcode == TGSI_OPCODE_TG4 && i == 1) ||
              (inst->Instruction.Opcode == TGSI_OPCODE_INTERP_SAMPLE && i == 1) ||
-             (inst->Instruction.Opcode == TGSI_OPCODE_LOAD && i == 1))
+             (inst->Instruction.Opcode == TGSI_OPCODE_LOAD && i == 1) ||
+	     (inst->Instruction.Opcode >= TGSI_OPCODE_ATOMUADD &&
+	      inst->Instruction.Opcode <= TGSI_OPCODE_ATOMIMAX && i == 1))
             stype = TGSI_TYPE_SIGNED;
 
          if (imd->type == TGSI_IMM_UINT32 || imd->type == TGSI_IMM_INT32) {
