@@ -43,6 +43,12 @@ struct vrend_sampler_array {
    int sview_rtype;
 };
 
+struct vrend_image_array {
+   int first;
+   int last;
+   int idx;
+};
+
 struct vrend_shader_info {
    uint32_t samplers_used_mask;
    uint32_t images_used_mask;
