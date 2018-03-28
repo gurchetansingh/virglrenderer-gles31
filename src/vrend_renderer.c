@@ -261,6 +261,12 @@ struct vrend_image_view {
    struct vrend_resource *texture;
 };
 
+struct vrend_ssbo {
+   struct vrend_resource *res;
+   unsigned buffer_size;
+   unsigned buffer_offset;
+};
+
 struct vrend_vertex_element {
    struct pipe_vertex_element base;
    GLenum type;
@@ -404,6 +410,9 @@ struct vrend_sub_context {
 
    struct vrend_image_view image_views[PIPE_SHADER_TYPES][PIPE_MAX_SHADER_IMAGES];
    uint32_t images_used_mask[PIPE_SHADER_TYPES];
+
+   struct vrend_ssbo ssbo[PIPE_SHADER_TYPES][PIPE_MAX_SHADER_BUFFERS];
+   uint32_t ssbo_used_mask[PIPE_SHADER_TYPES];
 };
 
 struct vrend_context {
@@ -1132,6 +1141,26 @@ static struct vrend_linked_shader_program *add_shader_program(struct vrend_conte
          }
       } else
          sprog->ubo_locs[id] = NULL;
+   }
+
+   for (id = PIPE_SHADER_VERTEX; id <= last_shader; id++) {
+      if (sprog->ss[id]->sel->sinfo.ssbo_used_mask) {
+         const char *prefix = pipe_shader_to_prefix(id);
+	 uint32_t mask = sprog->ss[id]->sel->sinfo.ssbo_used_mask;
+         sprog->ssbo_locs[id] = calloc(util_last_bit(mask), sizeof(uint32_t));
+
+	 while (mask) {
+	    i = u_bit_scan(&mask);
+            if (0)//sprog->ss[id]->sel->sinfo.ssbo_indirect)
+               snprintf(name, 32, "%sssbo[%d]", prefix, i);
+            else
+               snprintf(name, 32, "%sssbo%d", prefix, i);
+
+            sprog->ssbo_locs[id][i] = glGetProgramResourceIndex(prog_id, GL_SHADER_STORAGE_BLOCK, name);
+         }
+      } else
+         sprog->ssbo_locs[id] = NULL;
+      sprog->ssbo_used_mask[id] = sprog->ss[id]->sel->sinfo.ssbo_used_mask;
    }
 
    if (vs->sel->sinfo.num_ucp) {
@@ -2225,6 +2254,40 @@ void vrend_set_num_shader_images(struct vrend_context *ctx,
 
 }
 
+void vrend_set_single_ssbo(struct vrend_context *ctx,
+			   uint32_t shader_type,
+			   int index,
+			   uint32_t offset, uint32_t length,
+			   uint32_t handle)
+{
+   struct vrend_ssbo *ssbo = &ctx->sub->ssbo[shader_type][index];
+   struct vrend_resource *res;
+   if (handle) {
+      res = vrend_renderer_ctx_res_lookup(ctx, handle);
+      if (!res) {
+	 report_context_error(ctx, VIRGL_ERROR_CTX_ILLEGAL_RESOURCE, handle);
+	 return;
+      }
+      ssbo->buffer_offset = offset;
+      ssbo->buffer_size = length;
+      ssbo->res = res;
+      ctx->sub->ssbo_used_mask[shader_type] |= (1 << index);
+   } else {
+      ssbo->res = 0;
+      ssbo->buffer_offset = 0;
+      ssbo->buffer_size = 0;
+      ctx->sub->ssbo_used_mask[shader_type] &= ~(1 << index);
+   }
+}
+
+void vrend_set_num_ssbo(struct vrend_context *ctx,
+			uint32_t shader_type,
+			uint32_t start_slot,
+			uint32_t count)
+{
+
+}
+
 void vrend_memory_barrier(struct vrend_context *ctx,
 			  unsigned flags)
 {
@@ -3027,6 +3090,32 @@ static void vrend_draw_bind_ubo(struct vrend_context *ctx)
    }
 }
 
+static void vrend_draw_bind_ssbo(struct vrend_context *ctx)
+{
+   int i;
+   int shader_type;
+
+   for (shader_type = PIPE_SHADER_VERTEX; shader_type <= ctx->sub->last_shader_idx; shader_type++) {
+      uint32_t mask;
+      struct vrend_ssbo *ssbo;
+      struct vrend_resource *res;
+      if (!ctx->sub->ssbo_used_mask[shader_type])
+         continue;
+
+      mask = ctx->sub->ssbo_used_mask[shader_type];
+      while (mask) {
+         i = u_bit_scan(&mask);
+	 
+         ssbo = &ctx->sub->ssbo[shader_type][i];
+         res = (struct vrend_resource *)ssbo->res;
+	 fprintf(stderr, "binding %d %d %d\n", i, res->id, ctx->sub->prog->ssbo_locs[shader_type][i]);
+         glBindBufferRange(GL_SHADER_STORAGE_BUFFER, i, res->id,
+                           ssbo->buffer_offset, ssbo->buffer_size);
+	 glShaderStorageBlockBinding(ctx->sub->prog->id, ctx->sub->prog->ssbo_locs[shader_type][i], i);
+      }
+   }
+}
+
 static void vrend_draw_bind_images(struct vrend_context *ctx)
 {
    int shader_type;
@@ -3171,6 +3260,8 @@ void vrend_draw_vbo(struct vrend_context *ctx,
    vrend_draw_bind_samplers(ctx);
 
    vrend_draw_bind_ubo(ctx);
+
+   vrend_draw_bind_ssbo(ctx);
 
    vrend_draw_bind_images(ctx);
    if (!ctx->sub->ve) {

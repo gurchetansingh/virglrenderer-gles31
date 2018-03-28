@@ -1049,6 +1049,34 @@ static int vrend_decode_bind_shader(struct vrend_decode_ctx *ctx, int length)
 
 static int vrend_decode_set_shader_buffers(struct vrend_decode_ctx *ctx, uint16_t length)
 {
+   int num_ssbo;
+   uint32_t shader_type, start_slot;
+
+   if (length < 2)
+      return EINVAL;
+
+   num_ssbo = (length - 2) / VIRGL_SET_SHADER_BUFFER_ELEMENT_SIZE;
+   shader_type = get_buf_entry(ctx, VIRGL_SET_SHADER_BUFFER_SHADER_TYPE);
+   start_slot = get_buf_entry(ctx, VIRGL_SET_SHADER_BUFFER_START_SLOT);
+   if (shader_type >= PIPE_SHADER_TYPES)
+      return EINVAL;
+
+   if (num_ssbo < 1) {
+      vrend_set_num_ssbo(ctx->grctx, shader_type, 0, 0);
+      return 0;
+   }
+
+   if (start_slot + num_ssbo > PIPE_MAX_SHADER_BUFFERS)
+      return EINVAL;
+
+   for (int i = 0; i < num_ssbo; i++) {
+      uint32_t offset = get_buf_entry(ctx, i * VIRGL_SET_SHADER_BUFFER_ELEMENT_SIZE + 3);
+      uint32_t buf_len = get_buf_entry(ctx, i * VIRGL_SET_SHADER_BUFFER_ELEMENT_SIZE + 4);
+      uint32_t handle = get_buf_entry(ctx, i * VIRGL_SET_SHADER_BUFFER_ELEMENT_SIZE + 5);
+      vrend_set_single_ssbo(ctx->grctx, shader_type, start_slot + i, offset, buf_len,
+			    handle);
+   }
+   vrend_set_num_ssbo(ctx->grctx, shader_type, start_slot, num_ssbo);
    return 0;
 }
 

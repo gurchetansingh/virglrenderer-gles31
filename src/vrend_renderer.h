@@ -247,6 +247,15 @@ void vrend_set_num_shader_images(struct vrend_context *ctx,
 				 uint32_t shader_type,
 				 uint32_t start_slot,
 				 uint32_t count);
+void vrend_set_single_ssbo(struct vrend_context *ctx,
+			   uint32_t shader_type,
+			   int index,
+			   uint32_t offset, uint32_t length,
+			   uint32_t handle);
+void vrend_set_num_ssbo(struct vrend_context *ctx,
+			uint32_t shader_type,
+			uint32_t start_slot,
+			uint32_t count);
 void vrend_memory_barrier(struct vrend_context *ctx,
 			  unsigned flags);
 void vrend_launch_grid(struct vrend_context *ctx,
