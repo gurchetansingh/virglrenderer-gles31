@@ -3395,6 +3395,7 @@ void vrend_launch_grid(struct vrend_context *ctx,
 {
    struct vrend_linked_shader_program *prog;
    bool new_program = false;
+   struct vrend_resource *indirect_res = NULL;
    if (ctx->sub->cs_shader_dirty) {
       struct vrend_linked_shader_program *prog;
       bool same_prog, cs_dirty;
@@ -3430,6 +3431,20 @@ void vrend_launch_grid(struct vrend_context *ctx,
    vrend_use_program(ctx, ctx->sub->prog->id);
 
    if (indirect_handle) {
+      indirect_res = vrend_renderer_ctx_res_lookup(ctx, indirect_handle);
+      if (!indirect_res) {
+         report_context_error(ctx, VIRGL_ERROR_CTX_ILLEGAL_RESOURCE, indirect_handle);
+         return;
+      }
+   }
+
+   if (indirect_res)
+      glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, indirect_res->id);
+   else
+      glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, 0);
+
+   if (indirect_res) {
+      glDispatchComputeIndirect(indirect_offset);
    } else {
       glDispatchCompute(grid[0], grid[1], grid[2]);
    }
