@@ -916,6 +916,26 @@ static void bind_ssbo_locs(struct vrend_context *ctx, int id,
    sprog->ssbo_used_mask[id] = sprog->ss[id]->sel->sinfo.ssbo_used_mask;
 }
 
+static void bind_ubo_locs(struct vrend_context *ctx, int id,
+			  struct vrend_linked_shader_program *sprog)
+{
+   int i;
+   char name[32];
+   if (sprog->ss[id]->sel->sinfo.num_ubos) {
+      const char *prefix = pipe_shader_to_prefix(id);
+
+      sprog->ubo_locs[id] = calloc(sprog->ss[id]->sel->sinfo.num_ubos, sizeof(uint32_t));
+      for (i = 0; i < sprog->ss[id]->sel->sinfo.num_ubos; i++) {
+         if (sprog->ss[id]->sel->sinfo.ubo_indirect)
+            snprintf(name, 32, "%subo[%d]", prefix, i);
+         else
+            snprintf(name, 32, "%subo%d", prefix, i + 1);
+         sprog->ubo_locs[id][i] = glGetUniformBlockIndex(sprog->id, name);
+      }
+   } else
+      sprog->ubo_locs[id] = NULL;
+}
+
 static struct vrend_linked_shader_program *add_cs_shader_program(struct vrend_context *ctx,
 								 struct vrend_shader *cs)
 {
@@ -1153,20 +1173,7 @@ static struct vrend_linked_shader_program *add_shader_program(struct vrend_conte
    }
 
    for (id = PIPE_SHADER_VERTEX; id <= last_shader; id++) {
-      if (sprog->ss[id]->sel->sinfo.num_ubos) {
-         const char *prefix = pipe_shader_to_prefix(id);
-
-         sprog->ubo_locs[id] = calloc(sprog->ss[id]->sel->sinfo.num_ubos, sizeof(uint32_t));
-         for (i = 0; i < sprog->ss[id]->sel->sinfo.num_ubos; i++) {
-            if (sprog->ss[id]->sel->sinfo.ubo_indirect)
-               snprintf(name, 32, "%subo[%d]", prefix, i);
-            else
-               snprintf(name, 32, "%subo%d", prefix, i + 1);
-
-            sprog->ubo_locs[id][i] = glGetUniformBlockIndex(prog_id, name);
-         }
-      } else
-         sprog->ubo_locs[id] = NULL;
+      bind_ubo_locs(ctx, id, sprog);
    }
 
    for (id = PIPE_SHADER_VERTEX; id <= last_shader; id++) {
