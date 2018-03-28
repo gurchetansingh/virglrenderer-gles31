@@ -840,7 +840,13 @@ iter_declaration(struct tgsi_iterate_context *iter,
          name_prefix = "gl_PatchVerticesIn";
          ctx->system_values[i].override_no_wm = false;
       } else if (decl->Semantic.Name == TGSI_SEMANTIC_THREAD_ID) {
-	 name_prefix = "gl_LocalInvocationIndex";
+	 name_prefix = "gl_LocalInvocationID";
+	 ctx->system_values[i].override_no_wm = false;
+      } else if (decl->Semantic.Name == TGSI_SEMANTIC_BLOCK_ID) {
+	 name_prefix = "gl_WorkGroupID";
+	 ctx->system_values[i].override_no_wm = false;
+      } else if (decl->Semantic.Name == TGSI_SEMANTIC_GRID_SIZE) {
+	 name_prefix = "gl_NumWorkGroups";
 	 ctx->system_values[i].override_no_wm = false;
       } else {
          fprintf(stderr, "unsupported system value %d\n", decl->Semantic.Name);
@@ -1209,7 +1215,7 @@ static int emit_clip_dist_movs(struct dump_ctx *ctx)
    return 0;
 }
 
-#define emit_arit_op2(op) snprintf(buf, 255, "%s = %s(%s((%s %s %s))%s);\n", dsts[0], dstconv, dtypeprefix, srcs[0], op, srcs[1], writemask)
+#define emit_arit_op2(op) snprintf(buf, 512, "%s = %s(%s((%s %s %s))%s);\n", dsts[0], dstconv, dtypeprefix, srcs[0], op, srcs[1], writemask)
 #define emit_op1(op) snprintf(buf, 255, "%s = %s(%s(%s(%s))%s);\n", dsts[0], dstconv, dtypeprefix, op, srcs[0], writemask)
 #define emit_compare(op) snprintf(buf, 255, "%s = %s(%s((%s(%s(%s), %s(%s))))%s);\n", dsts[0], dstconv, dtypeprefix, op, svec4, srcs[0], svec4, srcs[1], writemask)
 
@@ -1819,7 +1825,7 @@ translate_image_store(struct dump_ctx *ctx,
    if (dst->Register.File == TGSI_FILE_IMAGE)
       snprintf(buf, 255, "imageStore(%s,%s(floatBitsToInt(%s)),%s%s(%s));\n", dsts[0], coord_prefix, srcs[0], ms_str, stypeprefix, srcs[1]);
    else
-      snprintf(buf, 255, "%s[int(%s)>>4] = floatBitsToUint(%s);\n", dsts[0], srcs[1], srcs[0]);
+      snprintf(buf, 255, "%s[int(%s)>>4] = floatBitsToUint(%s);\n", dsts[0], srcs[0], srcs[1]);
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 }
@@ -2371,7 +2377,10 @@ iter_instruction(struct tgsi_iterate_context *iter,
                    ctx->system_values[j].name == TGSI_SEMANTIC_INVOCATIONID ||
                    ctx->system_values[j].name == TGSI_SEMANTIC_SAMPLEID)
                   snprintf(srcs[i], 255, "%s(vec4(intBitsToFloat(%s)))", stypeprefix, ctx->system_values[j].glsl_name);
-               else if (ctx->system_values[j].name == TGSI_SEMANTIC_SAMPLEPOS) {
+               else if (ctx->system_values[j].name == TGSI_SEMANTIC_SAMPLEPOS ||
+			ctx->system_values[j].name == TGSI_SEMANTIC_GRID_SIZE ||
+			ctx->system_values[j].name == TGSI_SEMANTIC_THREAD_ID ||
+			ctx->system_values[j].name == TGSI_SEMANTIC_BLOCK_ID) {
                   snprintf(srcs[i], 255, "vec4(%s.%c, %s.%c, %s.%c, %s.%c)",
                            ctx->system_values[j].glsl_name, get_swiz_char(src->Register.SwizzleX),
                            ctx->system_values[j].glsl_name, get_swiz_char(src->Register.SwizzleY),
@@ -2542,7 +2551,7 @@ iter_instruction(struct tgsi_iterate_context *iter,
       EMIT_BUF_WITH_RET(ctx, buf);
       break;
    case TGSI_OPCODE_UADD:
-      snprintf(buf, 255, "%s = %s(%s(ivec4((uvec4(%s) + uvec4(%s))))%s);\n", dsts[0], dstconv, dtypeprefix, srcs[0], srcs[1], writemask);
+      snprintf(buf, 512, "%s = %s(%s(ivec4((uvec4(%s) + uvec4(%s))))%s);\n", dsts[0], dstconv, dtypeprefix, srcs[0], srcs[1], writemask);
       EMIT_BUF_WITH_RET(ctx, buf);
       break;
    case TGSI_OPCODE_SUB:
