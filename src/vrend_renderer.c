@@ -936,6 +936,33 @@ static void bind_ubo_locs(struct vrend_context *ctx, int id,
       sprog->ubo_locs[id] = NULL;
 }
 
+static void bind_image_locs(struct vrend_context *ctx, int id,
+                            struct vrend_linked_shader_program *sprog)
+{
+   int i;
+   char name[32];
+   if (sprog->ss[id]->sel->sinfo.images_used_mask) {
+      uint32_t mask = sprog->ss[id]->sel->sinfo.images_used_mask;
+      int nsamp = util_bitcount(sprog->ss[id]->sel->sinfo.images_used_mask);
+      int index;
+      sprog->img_locs[id] = calloc(nsamp, sizeof(uint32_t));
+      if (sprog->img_locs[id]) {
+         const char *prefix = pipe_shader_to_prefix(id);
+         index = 0;
+         while(mask) {
+            i = u_bit_scan(&mask);
+            snprintf(name, 32, "%simg%d", prefix, i);
+            sprog->img_locs[id][index] = glGetUniformLocation(sprog->id, name);
+            index++;
+         }
+      }
+   } else {
+      sprog->img_locs[id] = NULL;
+   }
+   sprog->images_used_mask[id] = sprog->ss[id]->sel->sinfo.images_used_mask;
+
+}
+
 static struct vrend_linked_shader_program *add_cs_shader_program(struct vrend_context *ctx,
 								 struct vrend_shader *cs)
 {
@@ -1124,25 +1151,7 @@ static struct vrend_linked_shader_program *add_shader_program(struct vrend_conte
    }
 
    for (id = PIPE_SHADER_VERTEX; id <= last_shader; id++) {
-      if (sprog->ss[id]->sel->sinfo.images_used_mask) {
-         uint32_t mask = sprog->ss[id]->sel->sinfo.images_used_mask;
-         int nsamp = util_bitcount(sprog->ss[id]->sel->sinfo.images_used_mask);
-         int index;
-         sprog->img_locs[id] = calloc(nsamp, sizeof(uint32_t));
-         if (sprog->img_locs[id]) {
-            const char *prefix = pipe_shader_to_prefix(id);
-            index = 0;
-            while(mask) {
-               i = u_bit_scan(&mask);
-	       snprintf(name, 32, "%simg%d", prefix, i);
-               sprog->img_locs[id][index] = glGetUniformLocation(prog_id, name);
-               index++;
-            }
-         }
-      } else {
-         sprog->img_locs[id] = NULL;
-      }
-      sprog->images_used_mask[id] = sprog->ss[id]->sel->sinfo.images_used_mask;
+      bind_image_locs(ctx, id, sprog);
    }
 
    for (id = PIPE_SHADER_VERTEX; id <= last_shader; id++) {
