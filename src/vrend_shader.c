@@ -1847,7 +1847,7 @@ translate_load(struct dump_ctx *ctx,
    if (src->Register.File == TGSI_FILE_IMAGE)
       snprintf(buf, 255, "%s = %s(imageLoad(%s, %s(floatBitsToInt(%s))%s));\n", dsts[0], dtypeprefix, srcs[0], coord_prefix, srcs[1], ms_str);
    else if (src->Register.File == TGSI_FILE_BUFFER)
-      snprintf(buf, 255, "%s = %s(uintBitsToFloat(%s[int(%s)>>2]));\n", dsts[0], dstconv, srcs[0], srcs[1]);
+      snprintf(buf, 255, "%s = %s(uintBitsToFloat(%s[int(%s)>>4]));\n", dsts[0], dstconv, srcs[0], srcs[1]);
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 
