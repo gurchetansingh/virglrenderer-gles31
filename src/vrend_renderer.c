@@ -893,6 +893,29 @@ static void set_stream_out_varyings(int prog_id, struct vrend_shader_info *sinfo
          free(varyings[i]);
 }
 
+static void bind_ssbo_locs(struct vrend_context *ctx, int id,
+			   struct vrend_linked_shader_program *sprog)
+{
+   int i;
+   char name[32];
+   if (sprog->ss[id]->sel->sinfo.ssbo_used_mask) {
+      const char *prefix = pipe_shader_to_prefix(id);
+      uint32_t mask = sprog->ss[id]->sel->sinfo.ssbo_used_mask;
+      sprog->ssbo_locs[id] = calloc(util_last_bit(mask), sizeof(uint32_t));
+
+      while (mask) {
+	 i = u_bit_scan(&mask);
+	 if (0)//sprog->ss[id]->sel->sinfo.ssbo_indirect)
+	    snprintf(name, 32, "%sssbo[%d]", prefix, i);
+	 else
+	    snprintf(name, 32, "%sssbo%d", prefix, i);
+	 sprog->ssbo_locs[id][i] = glGetProgramResourceIndex(sprog->id, GL_SHADER_STORAGE_BLOCK, name);
+      }
+   } else
+      sprog->ssbo_locs[id] = NULL;
+   sprog->ssbo_used_mask[id] = sprog->ss[id]->sel->sinfo.ssbo_used_mask;
+}
+
 static struct vrend_linked_shader_program *add_cs_shader_program(struct vrend_context *ctx,
 								 struct vrend_shader *cs)
 {
@@ -921,6 +944,9 @@ static struct vrend_linked_shader_program *add_cs_shader_program(struct vrend_co
    list_add(&sprog->sl[PIPE_SHADER_COMPUTE], &cs->programs);
    sprog->id = prog_id;
    list_addtail(&sprog->head, &ctx->sub->programs);
+
+   bind_ssbo_locs(ctx, PIPE_SHADER_COMPUTE, sprog);
+
    return sprog;
 }
 
@@ -1144,23 +1170,7 @@ static struct vrend_linked_shader_program *add_shader_program(struct vrend_conte
    }
 
    for (id = PIPE_SHADER_VERTEX; id <= last_shader; id++) {
-      if (sprog->ss[id]->sel->sinfo.ssbo_used_mask) {
-         const char *prefix = pipe_shader_to_prefix(id);
-	 uint32_t mask = sprog->ss[id]->sel->sinfo.ssbo_used_mask;
-         sprog->ssbo_locs[id] = calloc(util_last_bit(mask), sizeof(uint32_t));
-
-	 while (mask) {
-	    i = u_bit_scan(&mask);
-            if (0)//sprog->ss[id]->sel->sinfo.ssbo_indirect)
-               snprintf(name, 32, "%sssbo[%d]", prefix, i);
-            else
-               snprintf(name, 32, "%sssbo%d", prefix, i);
-
-            sprog->ssbo_locs[id][i] = glGetProgramResourceIndex(prog_id, GL_SHADER_STORAGE_BLOCK, name);
-         }
-      } else
-         sprog->ssbo_locs[id] = NULL;
-      sprog->ssbo_used_mask[id] = sprog->ss[id]->sel->sinfo.ssbo_used_mask;
+      bind_ssbo_locs(ctx, id, sprog);
    }
 
    if (vs->sel->sinfo.num_ucp) {
@@ -3090,12 +3100,19 @@ static void vrend_draw_bind_ubo(struct vrend_context *ctx)
    }
 }
 
-static void vrend_draw_bind_ssbo(struct vrend_context *ctx)
+static void vrend_draw_bind_ssbo(struct vrend_context *ctx, bool compute)
 {
    int i;
    int shader_type;
+   int start = PIPE_SHADER_VERTEX;
+   int end = ctx->sub->last_shader_idx;
 
-   for (shader_type = PIPE_SHADER_VERTEX; shader_type <= ctx->sub->last_shader_idx; shader_type++) {
+   if (compute) {
+      start = PIPE_SHADER_COMPUTE;
+      end = PIPE_SHADER_COMPUTE;
+   }
+ 
+   for (shader_type = start; shader_type <= end; shader_type++) {
       uint32_t mask;
       struct vrend_ssbo *ssbo;
       struct vrend_resource *res;
@@ -3261,7 +3278,7 @@ void vrend_draw_vbo(struct vrend_context *ctx,
 
    vrend_draw_bind_ubo(ctx);
 
-   vrend_draw_bind_ssbo(ctx);
+   vrend_draw_bind_ssbo(ctx, false);
 
    vrend_draw_bind_images(ctx);
    if (!ctx->sub->ve) {
@@ -3430,6 +3447,7 @@ void vrend_launch_grid(struct vrend_context *ctx,
    }
    vrend_use_program(ctx, ctx->sub->prog->id);
 
+   vrend_draw_bind_ssbo(ctx, true);
    if (indirect_handle) {
       indirect_res = vrend_renderer_ctx_res_lookup(ctx, indirect_handle);
       if (!indirect_res) {
