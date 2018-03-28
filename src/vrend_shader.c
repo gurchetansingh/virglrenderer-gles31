@@ -1217,9 +1217,9 @@ static int emit_clip_dist_movs(struct dump_ctx *ctx)
 
 #define emit_arit_op2(op) snprintf(buf, 512, "%s = %s(%s((%s %s %s))%s);\n", dsts[0], dstconv, dtypeprefix, srcs[0], op, srcs[1], writemask)
 #define emit_op1(op) snprintf(buf, 255, "%s = %s(%s(%s(%s))%s);\n", dsts[0], dstconv, dtypeprefix, op, srcs[0], writemask)
-#define emit_compare(op) snprintf(buf, 255, "%s = %s(%s((%s(%s(%s), %s(%s))))%s);\n", dsts[0], dstconv, dtypeprefix, op, svec4, srcs[0], svec4, srcs[1], writemask)
+#define emit_compare(op) snprintf(buf, 512, "%s = %s(%s((%s(%s(%s), %s(%s))))%s);\n", dsts[0], dstconv, dtypeprefix, op, svec4, srcs[0], svec4, srcs[1], writemask)
 
-#define emit_ucompare(op) snprintf(buf, 255, "%s = %s(uintBitsToFloat(%s(%s(%s(%s), %s(%s))%s) * %s(0xffffffff)));\n", dsts[0], dstconv, udstconv, op, svec4, srcs[0], svec4, srcs[1], writemask, udstconv)
+#define emit_ucompare(op) snprintf(buf, 512, "%s = %s(uintBitsToFloat(%s(%s(%s(%s), %s(%s))%s) * %s(0xffffffff)));\n", dsts[0], dstconv, udstconv, op, svec4, srcs[0], svec4, srcs[1], writemask, udstconv)
 
 static int emit_buf(struct dump_ctx *ctx, const char *buf)
 {
@@ -2377,11 +2377,16 @@ iter_instruction(struct tgsi_iterate_context *iter,
                    ctx->system_values[j].name == TGSI_SEMANTIC_INVOCATIONID ||
                    ctx->system_values[j].name == TGSI_SEMANTIC_SAMPLEID)
                   snprintf(srcs[i], 255, "%s(vec4(intBitsToFloat(%s)))", stypeprefix, ctx->system_values[j].glsl_name);
-               else if (ctx->system_values[j].name == TGSI_SEMANTIC_SAMPLEPOS ||
-			ctx->system_values[j].name == TGSI_SEMANTIC_GRID_SIZE ||
-			ctx->system_values[j].name == TGSI_SEMANTIC_THREAD_ID ||
-			ctx->system_values[j].name == TGSI_SEMANTIC_BLOCK_ID) {
-                  snprintf(srcs[i], 255, "vec4(%s.%c, %s.%c, %s.%c, %s.%c)",
+               else if (ctx->system_values[j].name == TGSI_SEMANTIC_SAMPLEPOS) {
+		  snprintf(srcs[i], 255, "vec4(%s.%c, %s.%c, %s.%c, %s.%c)",
+                           ctx->system_values[j].glsl_name, get_swiz_char(src->Register.SwizzleX),
+                           ctx->system_values[j].glsl_name, get_swiz_char(src->Register.SwizzleY),
+                           ctx->system_values[j].glsl_name, get_swiz_char(src->Register.SwizzleZ),
+                           ctx->system_values[j].glsl_name, get_swiz_char(src->Register.SwizzleW));
+	       } else if (ctx->system_values[j].name == TGSI_SEMANTIC_GRID_SIZE ||
+			  ctx->system_values[j].name == TGSI_SEMANTIC_THREAD_ID ||
+			  ctx->system_values[j].name == TGSI_SEMANTIC_BLOCK_ID) {
+                  snprintf(srcs[i], 255, "uvec4(%s.%c, %s.%c, %s.%c, %s.%c)",
                            ctx->system_values[j].glsl_name, get_swiz_char(src->Register.SwizzleX),
                            ctx->system_values[j].glsl_name, get_swiz_char(src->Register.SwizzleY),
                            ctx->system_values[j].glsl_name, get_swiz_char(src->Register.SwizzleZ),
