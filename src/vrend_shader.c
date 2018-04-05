@@ -1800,7 +1800,9 @@ translate_image_store(struct dump_ctx *ctx,
 		      struct tgsi_full_instruction *inst,
 		      int sreg_index,
 		      char srcs[4][255],
-		      char dsts[3][255])
+		      char dsts[3][255],
+                      bool dst0_override_no_wm,
+                      const char *writemask)
 {
    const struct tgsi_full_dst_register *dst = &inst->Dst[0];
    char buf[512];
@@ -1810,6 +1812,7 @@ translate_image_store(struct dump_ctx *ctx,
    const char *formatstr = get_internalformat_string(ctx->images[sreg_index].decl.Format, &itype);
    char ms_str[32] = {};
    const char *stypeprefix = "";
+   const char *wm = dst0_override_no_wm ? "" : writemask;
    if (is_ms) {
       snprintf(ms_str, 32, "int(%s.w),", srcs[0]);
    }
@@ -1825,7 +1828,7 @@ translate_image_store(struct dump_ctx *ctx,
    if (dst->Register.File == TGSI_FILE_IMAGE)
       snprintf(buf, 255, "imageStore(%s,%s(floatBitsToInt(%s)),%s%s(%s));\n", dsts[0], coord_prefix, srcs[0], ms_str, stypeprefix, srcs[1]);
    else
-      snprintf(buf, 255, "%s[int(%s)>>4] = floatBitsToUint(%s);\n", dsts[0], srcs[0], srcs[1]);
+      snprintf(buf, 255, "%s[int(%s)>>4]%s = floatBitsToUint(%s)%s;\n", dsts[0], srcs[0], wm, srcs[1], wm);
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 }
@@ -1836,7 +1839,9 @@ translate_load(struct dump_ctx *ctx,
 	       int sreg_index,
 	       const char *dstconv,
 	       char srcs[4][255],
-	       char dsts[3][255])
+	       char dsts[3][255],
+	       bool dst0_override_no_wm,
+	       const char *writemask)
 {
    char buf[512];
    bool is_ms = false;
@@ -1846,6 +1851,7 @@ translate_load(struct dump_ctx *ctx,
    const char *formatstr = get_internalformat_string(ctx->images[sreg_index].decl.Format, &itype);
    char ms_str[32] = {};
    const char *dtypeprefix = "";
+   const char *wm = dst0_override_no_wm ? "" : writemask;
    if (is_ms) {
       snprintf(ms_str, 32, ", int(%s.w)", srcs[1]);
    }
@@ -1860,7 +1866,7 @@ translate_load(struct dump_ctx *ctx,
    if (src->Register.File == TGSI_FILE_IMAGE)
       snprintf(buf, 255, "%s = %s(imageLoad(%s, %s(floatBitsToInt(%s))%s));\n", dsts[0], dtypeprefix, srcs[0], coord_prefix, srcs[1], ms_str);
    else if (src->Register.File == TGSI_FILE_BUFFER)
-      snprintf(buf, 255, "%s = %s(uintBitsToFloat(%s[int(%s)>>4]));\n", dsts[0], dstconv, srcs[0], srcs[1]);
+      snprintf(buf, 255, "%s = %s(uintBitsToFloat((%s[int(%s)>>4])%s));\n", dsts[0], dstconv, srcs[0], srcs[1], wm);
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 
@@ -2868,12 +2874,12 @@ iter_instruction(struct tgsi_iterate_context *iter,
       snprintf(buf, 255, "barrier();\n");
       break;
    case TGSI_OPCODE_STORE:
-      ret = translate_image_store(ctx, inst, sreg_index, srcs, dsts);
+      ret = translate_image_store(ctx, inst, sreg_index, srcs, dsts, dst_override_no_wm[0], writemask);
       if (ret)
          return FALSE;
       break;
    case TGSI_OPCODE_LOAD:
-      ret = translate_load(ctx, inst, sreg_index, dstconv, srcs, dsts);
+      ret = translate_load(ctx, inst, sreg_index, dstconv, srcs, dsts, dst_override_no_wm[0], writemask);
       if (ret)
          return FALSE;
       break;
