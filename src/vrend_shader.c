@@ -1828,7 +1828,7 @@ translate_image_store(struct dump_ctx *ctx,
    if (dst->Register.File == TGSI_FILE_IMAGE)
       snprintf(buf, 255, "imageStore(%s,%s(floatBitsToInt(%s)),%s%s(%s));\n", dsts[0], coord_prefix, srcs[0], ms_str, stypeprefix, srcs[1]);
    else
-      snprintf(buf, 255, "%s[int(%s)>>4]%s = floatBitsToUint(%s)%s;\n", dsts[0], srcs[0], wm, srcs[1], wm);
+      snprintf(buf, 255, "%s[uint(floatBitsToUint(%s))>>4]%s = floatBitsToUint(%s)%s;\n", dsts[0], srcs[0], wm, srcs[1], wm);
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 }
