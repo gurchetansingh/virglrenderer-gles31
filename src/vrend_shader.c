@@ -1825,10 +1825,40 @@ translate_image_store(struct dump_ctx *ctx,
       break;
    }
 
-   if (dst->Register.File == TGSI_FILE_IMAGE)
+   if (dst->Register.File == TGSI_FILE_IMAGE) {
       snprintf(buf, 255, "imageStore(%s,%s(floatBitsToInt(%s)),%s%s(%s));\n", dsts[0], coord_prefix, srcs[0], ms_str, stypeprefix, srcs[1]);
-   else
-      snprintf(buf, 255, "%s[uint(floatBitsToUint(%s))>>4]%s = floatBitsToUint(%s)%s;\n", dsts[0], srcs[0], wm, srcs[1], wm);
+   } else {
+      /*This is implementating the following TGSI opcode:
+
+        STORE resource, address, src
+
+        The spec says "the ‘address’ is specified as a vector of unsigned integers". To calculate
+        the correct swizzle, the following code assumes srcs[0] is of the form:
+
+        uintBitsToFloat(uvec4(20U,20U,20U,20U))
+
+        This solution is admittedly very fragile.
+       */
+      long int address = strtol(srcs[0] + 22, NULL, 10);
+      uint32_t offset = (address % 16) / 4;
+      if (offset) {
+         char dst_swizzles[4] ="";
+         char src_swizzles[4] ="";
+         uint32_t i = 0;
+         for (uint32_t j = 0; j < 4; j++) {
+            if (dst->Register.WriteMask & (1 << j)) {
+               // Assumes TGSI_WRITEMASK_X = 0x1,  TGSI_WRITEMASK_X = 0x2, etc. See p_shader_tokens.h
+               src_swizzles[i] = get_swiz_char(j);
+               dst_swizzles[i] = get_swiz_char(offset + j);
+               i++;
+	    }
+         }
+
+         snprintf(buf, 255, "%s[uint(floatBitsToUint(%s))>>4].%s = floatBitsToUint(%s).%s;\n", dsts[0], srcs[0], dst_swizzles, srcs[1], src_swizzles);
+      } else {
+         snprintf(buf, 255, "%s[uint(floatBitsToUint(%s))>>4]%s = floatBitsToUint(%s)%s;\n", dsts[0], srcs[0], wm, srcs[1], wm);
+      }
+   }
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 }
@@ -1846,6 +1876,7 @@ translate_load(struct dump_ctx *ctx,
    char buf[512];
    bool is_ms = false;
    const struct tgsi_full_src_register *src = &inst->Src[0];
+   const struct tgsi_full_dst_register *dst = &inst->Dst[0];
    const char *coord_prefix = get_coord_prefix(ctx->images[sreg_index].decl.Resource, &is_ms);
    enum tgsi_return_type itype;
    const char *formatstr = get_internalformat_string(ctx->images[sreg_index].decl.Format, &itype);
@@ -1865,8 +1896,26 @@ translate_load(struct dump_ctx *ctx,
    }
    if (src->Register.File == TGSI_FILE_IMAGE)
       snprintf(buf, 255, "%s = %s(imageLoad(%s, %s(floatBitsToInt(%s))%s));\n", dsts[0], dtypeprefix, srcs[0], coord_prefix, srcs[1], ms_str);
-   else if (src->Register.File == TGSI_FILE_BUFFER)
-      snprintf(buf, 255, "%s = %s(uintBitsToFloat((%s[int(%s)>>4])%s));\n", dsts[0], dstconv, srcs[0], srcs[1], wm);
+   else if (src->Register.File == TGSI_FILE_BUFFER) {
+      /* See comment in translate_image_store.  The following code assumes the srcs[1] is of the form:
+
+         ivec4(uvec4(16U,16U,16U,16U))
+       */
+      long int address = strtol(srcs[1] + 12, NULL, 10);
+      uint32_t offset = (address % 16) / 4;
+      if (offset) {
+         char swizzles[4] ="";
+         uint32_t i = 0;
+         for (uint32_t j = 0; j < 4; j++) {
+            if (dst->Register.WriteMask & (1 << j))
+               swizzles[i++] = get_swiz_char(offset + j);
+         }
+
+         snprintf(buf, 255, "%s = %s(uintBitsToFloat((%s[int(%s)>>4]).%s));\n", dsts[0], dstconv, srcs[0], srcs[1], swizzles);
+      } else {
+         snprintf(buf, 255, "%s = %s(uintBitsToFloat((%s[int(%s)>>4])%s));\n", dsts[0], dstconv, srcs[0], srcs[1], wm);
+      }
+   }
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 
