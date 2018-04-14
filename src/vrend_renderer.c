@@ -3143,6 +3143,9 @@ static void vrend_draw_bind_ssbo(struct vrend_context *ctx)
    int shader_type;
 
    for (shader_type = PIPE_SHADER_VERTEX; shader_type <= ctx->sub->last_shader_idx; shader_type++) {
+      if (!ctx->sub->prog->ssbo_locs[shader_type])
+         continue;
+
       vrend_draw_bind_ssbo_shader(ctx, shader_type);
    }
 }
