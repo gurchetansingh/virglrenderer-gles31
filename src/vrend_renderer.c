@@ -1234,7 +1234,7 @@ static void vrend_destroy_program(struct vrend_linked_shader_program *ent)
    glDeleteProgram(ent->id);
    list_del(&ent->head);
 
-   for (i = PIPE_SHADER_VERTEX; i <= PIPE_SHADER_GEOMETRY; i++) {
+   for (i = PIPE_SHADER_VERTEX; i <= PIPE_SHADER_COMPUTE; i++) {
       if (ent->ss[i])
          list_del(&ent->sl[i]);
       free(ent->shadow_samp_mask_locs[i]);
