@@ -1218,6 +1218,9 @@ static struct vrend_linked_shader_program *lookup_shader_program(struct vrend_co
    LIST_FOR_EACH_ENTRY(ent, &ctx->sub->programs, head) {
       if (ent->dual_src_linked != dual_src)
          continue;
+      if (!ent->ss[PIPE_SHADER_VERTEX] || !ent->ss[PIPE_SHADER_FRAGMENT])
+         continue;
+
       if (ent->ss[PIPE_SHADER_VERTEX]->id == vs_id && ent->ss[PIPE_SHADER_FRAGMENT]->id == fs_id) {
          if (!ent->ss[PIPE_SHADER_GEOMETRY] && gs_id == 0)
             return ent;
