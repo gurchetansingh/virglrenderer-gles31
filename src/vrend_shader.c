@@ -2003,7 +2003,7 @@ translate_atomic(struct dump_ctx *ctx,
    if (src->Register.File == TGSI_FILE_IMAGE)
       snprintf(buf, 512, "%s = %s(imageAtomic%s(%s, %s(floatBitsToInt(%s))%s, %s(%s(%s))%s));\n", dsts[0], dtypeprefix, opname, srcs[0], coord_prefix, srcs[1], ms_str, stypecast, stypeprefix, srcs[2], cas_str);
    else
-      snprintf(buf, 512, "%s = %s(atomic%s(%s[int(%s) >> 4].x, uint(%s.x)));\n", dsts[0], dtypeprefix, opname, srcs[0], srcs[1], srcs[2]);
+      snprintf(buf, 512, "%s = float(uintBitsToFloat(atomic%s(%s[int(%s) >> 4].x, uint(%s.x))));\n", dsts[0], opname, srcs[0], srcs[1], srcs[2]);
    EMIT_BUF_WITH_RET(ctx, buf);
    return 0;
 
@@ -2263,6 +2263,23 @@ iter_instruction(struct tgsi_iterate_context *iter,
             stprefix = true;
             stypeprefix = "floatBitsToInt";
          }
+         if (inst->Instruction.Opcode == TGSI_OPCODE_ATOMUADD || inst->Instruction.Opcode == TGSI_OPCODE_ATOMXCHG || inst->Instruction.Opcode == TGSI_OPCODE_ATOMCAS  ||
+             inst->Instruction.Opcode == TGSI_OPCODE_ATOMAND  || inst->Instruction.Opcode == TGSI_OPCODE_ATOMOR   || inst->Instruction.Opcode == TGSI_OPCODE_ATOMXOR  ||
+             inst->Instruction.Opcode == TGSI_OPCODE_ATOMUMIN || inst->Instruction.Opcode == TGSI_OPCODE_ATOMUMAX || inst->Instruction.Opcode == TGSI_OPCODE_ATOMIMIN ||
+             inst->Instruction.Opcode == TGSI_OPCODE_ATOMIMAX) {
+
+            stprefix = true;
+            if (i == 1)
+               stypeprefix = "floatBitsToInt";
+            if (i == 2)
+               stypeprefix = "floatBitsToUint";
+         }
+
+         if (inst->Instruction.Opcode == TGSI_OPCODE_LOAD) {
+            stprefix = true;
+            if (i == 1)
+               stypeprefix = "floatBitsToInt";
+	 }
 
          if (src->Register.Indirect) {
             assert(src->Indirect.File == TGSI_FILE_ADDRESS);
