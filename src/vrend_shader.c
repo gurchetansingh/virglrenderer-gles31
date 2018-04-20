@@ -1952,7 +1952,7 @@ translate_atomic(struct dump_ctx *ctx,
       break;
    case TGSI_RETURN_TYPE_SINT:
       stypeprefix = "floatBitsToInt";
-      dtypeprefix = "floatBitstoUint";
+      dtypeprefix = "floatBitsToUint";
       stypecast = "int";
       break;
    }
